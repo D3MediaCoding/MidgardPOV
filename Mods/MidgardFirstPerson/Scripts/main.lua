@@ -113,6 +113,73 @@ local function captureControls(current)
     if current.crosshair then current.crosshair:show(settings.Crosshair) end
 end
 
+-- The game rotates its map texture 45 degrees. In-game forward movement
+-- confirmed the heading basis needs the opposite orientation: yaw - 45.
+local function updateMinimap(current)
+    local root=menuUI and menuUI.root
+    if not valid(root) then return end
+    if not current.minimap and current.minimapTriedRoot~=root then
+        current.minimapTriedRoot=root
+        local hudPath=root:GetFullName():match("^%S+ (.*)%.WidgetTree%.CanvasPanel_0$")
+        if not hudPath then return end
+        for _,widget in ipairs(FindAllOf("CanvasPanel") or {}) do
+            if valid(widget) then
+                local fullName=widget:GetFullName()
+                if fullName:find(hudPath .. ".WidgetTree.BP_HUD_Compass",1,true) and
+                    fullName:match("%.BP_WorldmapWidget%.WidgetTree%.ContentRoot$") then
+                    local pivot=widget.RenderTransformPivot
+                    current.minimap={widget=widget,angle=widget.RenderTransform.Angle,
+                        pivot={X=pivot.X,Y=pivot.Y}}
+                    widget:SetRenderTransformPivot({X=0.5,Y=0.5})
+                    local mapTree=widget:GetOuter()
+                    local mapRoot=mapTree.RootWidget
+                    local label=StaticConstructObject(StaticFindObject("/Script/UMG.TextBlock"),mapTree)
+                    if valid(label) then
+                        current.minimap.compass=label
+                        label:SetVisibility(3) -- decorative, does not capture mouse input
+                        local font=label.Font; font.Size=16; label:SetFont(font)
+                        label:SetJustification(1)
+                        -- A sibling of the clipped map layer stays upright
+                        -- and follows the minimap's own layout and UI scale.
+                        local slot=mapRoot:AddChildToCanvas(label)
+                        slot:SetAnchors({Minimum={X=0.5,Y=1},Maximum={X=0.5,Y=1}})
+                        slot:SetAlignment({X=0.5,Y=1})
+                        slot:SetPosition({X=0,Y=-8}); slot:SetSize({X=180,Y=26})
+                        slot:SetAutoSize(false); slot:SetZOrder(20000)
+                    end
+                    log("Camera-relative minimap and compass attached.")
+                    break
+                end
+            end
+        end
+    end
+    local map=current.minimap
+    if not map or not valid(map.widget) then return end
+    local heading=(current.yaw-45)%360
+    if not map.lastYaw or math.abs(current.yaw-map.lastYaw)>0.01 then
+        map.widget:SetRenderTransformAngle(map.angle-heading)
+        map.lastYaw=current.yaw
+    end
+    local degree=math.floor(heading+0.5)%360
+    if valid(map.compass) and map.lastDegree~=degree then
+        local directions={"N","NE","E","SE","S","SW","W","NW"}
+        local sector=math.floor((heading+22.5)/45)%8+1
+        map.compass:SetText(FText(directions[sector] .. "  |  " .. degree .. "°"))
+        map.lastDegree=degree
+    end
+end
+
+local function restoreMinimap(previous)
+    local map=previous.minimap
+    previous.minimap=nil
+    if not map then return end
+    if valid(map.widget) then
+        map.widget:SetRenderTransformAngle(map.angle)
+        map.widget:SetRenderTransformPivot(map.pivot)
+    end
+    if valid(map.compass) then map.compass:RemoveFromParent() end
+end
+
 local function stop(reason)
     local previous = state
     state = nil
@@ -121,6 +188,7 @@ local function stop(reason)
         local ok, err = pcall(callback)
         if not ok then log("Could not restore " .. label .. ": " .. tostring(err)) end
     end
+    restore("minimap",function() restoreMinimap(previous) end)
     restore("view target", function()
         if valid(previous.controller) and valid(previous.camera) and
             previous.controller:GetViewTarget() == previous.camera then
@@ -495,6 +563,7 @@ serviceMenu=function()
             local candidate=menu.create(controller,{action=menuAction,close=function() closeMenu(true) end,toggle=toggleMenu},log)
             if candidate.attached then
                 menuUI=candidate; menuUI.pawn=controller.Pawn
+
                 log("Mod settings ready: click the HUD button with the cursor visible, or press Insert.")
             end
         end
@@ -618,6 +687,14 @@ LoopInGameThreadAfterFrames(1, function()
                 table.remove(current.newMeshes,1)
                 local ok,err=pcall(current.appearance.consider,current.appearance,entry.object,entry.kind)
                 if not ok then log("New mesh check skipped: " .. tostring(err)) end
+            end
+            if not current.minimapFailed then
+                local ok,err=pcall(updateMinimap,current)
+                if not ok then
+                    current.minimapFailed=true
+                    pcall(restoreMinimap,current)
+                    log("Minimap disabled after error: " .. tostring(err))
+                end
             end
             aim.processProjectiles(current, config, log)
             local position, rotation = viewPose(current.pawn, current)

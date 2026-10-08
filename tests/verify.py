@@ -187,7 +187,13 @@ function world:SpawnActor(class,location,rotation)
     return originalBegin(gameplay,pawn,class,{Translation=location},1,pawn)
 end
 scans=0
-canvas=object('ViewportRootCanvas'); canvas.children={}
+canvas=object('CanvasPanel /Test.BP_HUD_C_123.WidgetTree.CanvasPanel_0'); canvas.children={}
+mapCanvas=object('CanvasPanel /Test.BP_HUD_C_123.WidgetTree.BP_HUD_Compass_127.WidgetTree.BP_WorldmapWidget.WidgetTree.ContentRoot')
+mapCanvas.RenderTransform={Angle=7}; mapCanvas.RenderTransformPivot={X=0.2,Y=0.3}
+function mapCanvas:SetRenderTransformAngle(angle) self.RenderTransform.Angle=angle; self.writes=(self.writes or 0)+1 end
+function mapCanvas:SetRenderTransformPivot(pivot) self.RenderTransformPivot=pivot end
+unrelatedMap=object('CanvasPanel /Test.BP_MainTab_Map.WidgetTree.BP_WorldmapWidget.WidgetTree.ContentRoot')
+function unrelatedMap:SetRenderTransformAngle() error('Full map must not rotate') end
 tree=object('WidgetTree'); viewportWidget=object('BP_HUD_C /Game/LocalViewportWidget')
 tree.RootWidget=canvas
 function canvas:IsA(class) return class.label=='/Script/UMG.CanvasPanel' end
@@ -215,8 +221,12 @@ function canvas:AddChildToCanvas(image)
     function slot:SetZOrder(v) self.z=v end
     return slot
 end
+mapTree=object('MinimapWidgetTree')
+miniRoot=object('MinimapRoot'); miniRoot.children={}; miniRoot.AddChildToCanvas=canvas.AddChildToCanvas
+mapTree.RootWidget=miniRoot
+function mapCanvas:GetOuter() return mapTree end
 function StaticConstructObject(class,outer)
-    assert(outer==tree)
+    assert(outer==tree or outer==mapTree)
     local image=object(class.label)
     if class.label=='/Script/UMG.CanvasPanel' then
         image.children={}; image.AddChildToCanvas=canvas.AddChildToCanvas
@@ -224,6 +234,7 @@ function StaticConstructObject(class,outer)
         image.Font={Size=18}
         function image:SetText(text) self.text=text end
         function image:SetFont(font) self.Font=font end
+        function image:SetJustification(value) self.justification=value end
     elseif class.label=='/Script/UMG.Button' then
         function image:SetBackgroundColor(color) self.background=color end
         function image:SetContent(text) self.content=text; text.parent=self end
@@ -240,7 +251,7 @@ function FindAllOf(class)
     if class=='PlayerController' then return {remote,pc} end
     if class=='SkeletalMeshComponent' then return {mesh} end
     if class=='StaticMeshComponent' then return {helmet,weapon} end
-    if class=='CanvasPanel' then return {candidateCanvas} end
+    if class=='CanvasPanel' then return {candidateCanvas,unrelatedMap,mapCanvas} end
     return {}
 end
 function StaticFindObject(path)
@@ -490,11 +501,34 @@ ui:destroy(); assert(not ui.attached and #ui.images==0)
 for _,piece in ipairs(pieces) do assert(piece.parent==nil) end
 -- Save-and-quit must clean up before outgoing objects become unsafe.
 pc.target=original; press(Key.F6); local outgoing=pc.target
+pc.dx=0; pc.dy=0; for _=1,120 do tick() end -- allow HUD reattachment after respawn cases
+assert(mapCanvas.RenderTransformPivot.X==0.5 and mapCanvas.RenderTransformPivot.Y==0.5)
+local heading=(pc.target.rotation.Yaw-45)%360
+assert(math.abs(mapCanvas.RenderTransform.Angle-(7-heading))<0.001)
+local compass
+for _,child in ipairs(miniRoot.children) do
+    if child.parent==miniRoot and child.justification==1 then compass=child end
+end
+assert(compass and compass.text:find('|',1,true) and compass.visibility==3)
+assert(compass.slot.anchors.Minimum.Y==1 and compass.slot.position.Y==-8)
+local mapScans=scans; local mapWrites=mapCanvas.writes
+for _=1,5 do tick() end
+assert(scans==mapScans and mapCanvas.writes==mapWrites)
+pc.dx=30; tick(); pc.dx=0
+assert(mapCanvas.writes>mapWrites)
+press(Key.F9); tick() -- the same rotation follows the third-person camera
+assert(compass.parent==miniRoot)
+press(Key.F6) -- Original view restores all map state and removes the compass
+assert(mapCanvas.RenderTransform.Angle==7 and compass.parent==nil)
+assert(mapCanvas.RenderTransformPivot.X==0.2 and mapCanvas.RenderTransformPivot.Y==0.3)
+tick(); assert(mapCanvas.RenderTransform.Angle==7)
+press(Key.F6); tick(); outgoing=pc.target
 press(0x2D) -- also cover an open settings panel with its movement lock
 assert(pc.moveLocks==1)
 local function ref(o) return {get=function() return o end} end
 assert(hooks.loadMapPre()==nil) -- never override the engine's return value
 assert(pc.target==original and not outgoing.alive and not mesh.headHidden)
+assert(mapCanvas.RenderTransform.Angle==7)
 assert(pc.moveLocks==0 and inputSettings.mappings==0)
 assert(cvars['r.Tonemapper.Sharpen']==-1 and cvars['r.MaxAnisotropy']==8)
 local findBefore=findCalls

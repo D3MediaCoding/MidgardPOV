@@ -2,13 +2,19 @@
 
 An unofficial beta camera, aiming and color-grading mod for the **Windows Steam edition of Tribes of Midgard**, developed against Steam build **19737805 / Unreal Engine 4.27**.
 
-This repository contains **0.8.1-beta**, including the save-and-quit cleanup fix. The original **0.8-beta** Nexus package source is preserved at [commit 5e3e670](https://github.com/D3MediaCoding/MidgardPOV/tree/5e3e670f4af83a000807cc6c43dcf279ed5e67e0). Compiled UE4SS loader binaries are upstream dependencies and are not committed here.
+This repository contains **0.8.1-beta** source, including the save-and-quit cleanup fix and camera-relative minimap update. The original **0.8-beta** Nexus package source is preserved at [commit 5e3e670](https://github.com/D3MediaCoding/MidgardPOV/tree/5e3e670f4af83a000807cc6c43dcf279ed5e67e0). Compiled UE4SS loader binaries are upstream dependencies and are not committed here.
 
 **Nexus page:** https://www.nexusmods.com/tribesofmidgard/mods/4
 
 The Nexus page is currently unpublished and the installer ZIP is quarantined pending moderation review. This source repository does not establish that the package has passed Nexus review.
 
 ## Features
+
+### Camera-relative minimap and compass
+
+While first- or third-person mode is active, the HUD minimap rotates with camera yaw so forward travel points toward the top of the map. An upright compass inside the minimap's bottom edge displays a cardinal direction and bearing. The heading includes the 180-degree correction identified during in-game testing. Original view restores the previous map angle and pivot and removes the compass; world-exit cleanup restores these before travel. The full-screen map is unchanged.
+
+Widget discovery runs once per camera activation/attachment. Updates use cached widgets and write only changed headings. Regression checks cover both camera modes, compass placement and removal, idle update counts, unrelated map isolation and travel cleanup. The user confirmed the corrected local update worked in-game.
 
 ### 0.8.1: save-and-quit cleanup
 
@@ -23,6 +29,7 @@ Regression tests cover an open settings panel during travel, input/camera restor
 - Original, Natural, Atmospheric and Vivid graphics presets.
 - An in-game settings panel and automatically saved preferences.
 - Optional F-key shortcuts.
+- Camera-relative minimap rotation and an integrated compass in first/third person.
 - Experimental vertical launch steering for locally owned projectiles using Unreal's standard ProjectileMovementComponent.
 
 The mod adjusts existing rendering. It does not replace textures, models or lighting assets. Custom weapons, multiplayer behavior and damage across elevations need more testing. The original game assets can clip or look incomplete from these camera positions. No FPS improvement is guaranteed.
