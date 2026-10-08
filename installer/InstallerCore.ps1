@@ -59,7 +59,7 @@ function Install-Midgard([string]$GameFolder,[string]$Payload) {
             Copy-Item -LiteralPath $taskChange.Source -Destination $taskChange.Target
         }
         foreach ($taskChange in $taskPlan) { $taskOld[$taskChange.Path]=[pscustomobject]@{Path=$taskChange.Path;SHA256=$taskChange.SHA256} }
-        $taskRecord=[pscustomobject]@{Product='MidgardPOV';Version='0.8';Files=@($taskOld.Values)}
+        $taskRecord=[pscustomobject]@{Product='MidgardPOV';Version='0.8.1';Files=@($taskOld.Values)}
         $taskTemporary=$taskManifestPath+'.tmp'
         $taskRecord | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $taskTemporary -Encoding UTF8
         Move-Item -LiteralPath $taskTemporary -Destination $taskManifestPath -Force
@@ -71,7 +71,7 @@ function Install-Midgard([string]$GameFolder,[string]$Payload) {
         }
         throw
     }
-    return "Installed Midgard POV 0.8. Launch the game, enter a world, and open Mod settings or press Insert."
+    return "Installed Midgard POV 0.8.1. Launch the game, enter a world, and open Mod settings or press Insert."
 }
 function Uninstall-Midgard([string]$GameFolder) {
     Assert-MidgardClosed

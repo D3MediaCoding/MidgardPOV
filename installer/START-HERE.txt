@@ -1,4 +1,4 @@
-MIDGARD POV 0.8 — Windows Steam edition
+MIDGARD POV 0.8.1 — Windows Steam edition
 
 1. Extract the entire ZIP to a folder. Close Tribes of Midgard.
 2. Double-click Install.cmd. Select your Steam game folder if it isn't detected.

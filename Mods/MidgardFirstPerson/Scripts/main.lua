@@ -17,6 +17,8 @@ local menuUI, menuController, menuLibrary
 local menuLock, menuOriginalCursor = false, false
 local menuFrame = 0
 local serviceMenu
+local transitioning = false
+local pendingInputRestore
 
 local function log(message)
     print("[MidgardFirstPerson] " .. tostring(message) .. "\n")
@@ -259,17 +261,93 @@ local function start()
     state.crosshair = crosshair.create(controller, log)
     state.crosshair:show(settings.Crosshair and state.captured)
     if state.captured then updateAim(state, position) end
-    log("Enabled v0.8: " .. (settings.ThirdPerson and "third person" or "first person") ..
+    log("Enabled v0.8.1: " .. (settings.ThirdPerson and "third person" or "first person") ..
         ", FOV " .. settings.FOV .. ", sensitivity " .. settings.MouseSensitivity .. ". F9 switches view; F8 releases cursor.")
 end
 
 local function guarded(callback)
+    if transitioning then return end
     local ok, err = pcall(callback)
     if not ok then
         log("Error: " .. tostring(err))
         stop("error; see UE4SS.log")
     end
 end
+
+-- Detach while the outgoing world is still usable. Set the gate first so
+-- destroying our camera cannot re-enter camera, aim, menu or EndPlay work.
+local function leaveWorld(reason)
+    if transitioning then return end
+    transitioning = true
+    local hadCamera = state ~= nil
+    stop(reason)
+    local ui, controller, library = menuUI, menuController, menuLibrary
+    local locked, originalCursor = menuLock, menuOriginalCursor
+    menuUI, menuController, menuLibrary = nil, nil, nil
+    menuLock = false
+    menuFrame = 0
+    if valid(controller) then
+        if locked then pcall(function() controller:SetIgnoreMoveInput(false) end) end
+        if ui and ui.opened and not hadCamera then
+            pcall(function()
+                controller.bShowMouseCursor = originalCursor
+                if originalCursor then library:SetInputMode_GameAndUIEx(controller,nil,0,false)
+                else library:SetInputMode_GameOnly(controller) end
+            end)
+        end
+    end
+    if ui then pcall(ui.destroy,ui) end
+    log("World transition cleanup: " .. reason)
+end
+local function abandonWorld(reason)
+    -- EndPlay can arrive after subclass teardown. Never inspect or mutate
+    -- outgoing UObjects here; the world owns their destruction.
+    transitioning = true
+    if state then
+        pendingInputRestore = {inputSettings=state.inputSettings,
+            axisMappings=state.axisMappings, mouseSmoothing=state.mouseSmoothing}
+    end
+    state, menuUI, menuController, menuLibrary = nil, nil, nil, nil
+    menuLock = false
+    menuFrame = 0
+    log("Stopped callbacks during teardown: " .. reason)
+end
+local function lifecycle(label, register, callback)
+    local ok, err = pcall(function() register(callback) end)
+    if not ok then log(label .. " unavailable: " .. tostring(err)) end
+end
+lifecycle("LoadMap pre-hook", RegisterLoadMapPreHook, function()
+    leaveWorld("map travel / save and quit")
+    -- nil preserves the game's return value and save/travel behavior.
+end)
+lifecycle("LoadMap post-hook", RegisterLoadMapPostHook, function()
+    local pending = pendingInputRestore
+    pendingInputRestore = nil
+    -- InputSettings belongs to the engine, not the outgoing world.
+    if pending and valid(pending.inputSettings) then
+        pcall(function()
+            for _,mapping in ipairs(pending.axisMappings or {}) do
+                pending.inputSettings:RemoveAxisMapping(mapping,true)
+            end
+            if pending.mouseSmoothing~=nil then
+                pending.inputSettings.bEnableMouseSmoothing=pending.mouseSmoothing
+            end
+        end)
+    end
+    transitioning = false
+    menuFrame = 0
+end)
+lifecycle("QuitGame pre-hook", function(callback)
+    RegisterHook("/Script/Engine.KismetSystemLibrary:QuitGame",callback)
+end, function() leaveWorld("quit game") end)
+lifecycle("EndPlay pre-hook", RegisterEndPlayPreHook, function(context)
+    if transitioning then return end
+    local actor = context:get()
+    if (state and (actor == state.pawn or actor == state.controller or actor == state.camera))
+        or (menuController and actor == menuController) then
+        abandonWorld("local actor EndPlay")
+    end
+end)
 
 local function diagnostic()
     -- Report cached Lua values only. No UObject scans, material enumeration,
@@ -292,7 +370,7 @@ end
 local okLateCamera, lateError = pcall(function()
     RegisterHook("/Script/Engine.PlayerCameraManager:BlueprintUpdateCamera",
         function(context, target, outputLocation, outputRotation, outputFOV)
-            if not state or context:get() ~= state.controller.PlayerCameraManager or target:get() ~= state.camera then return end
+            if transitioning or not state or context:get() ~= state.controller.PlayerCameraManager or target:get() ~= state.camera then return end
             local ok, location, rotation = pcall(viewPose, state.pawn, state)
             if not ok then log("Late camera error: " .. tostring(location)); return end
             outputLocation:set(location)
@@ -406,7 +484,8 @@ end
 serviceMenu=function()
     menuFrame=menuFrame+1
     if menuUI and (not valid(menuController) or not valid(menuUI.root) or menuController.Pawn~=menuUI.pawn) then
-        closeMenu(false); menuUI:destroy(); menuUI=nil; menuController=nil
+        -- The host may already be tearing down; do not call widget methods.
+        menuUI=nil; menuController=nil; menuLibrary=nil; menuLock=false
     end
     if not menuUI and (menuFrame==1 or menuFrame%120==0) then
         local controller=state and state.controller or localController()
@@ -485,6 +564,7 @@ adjustSetting(0x23, "MouseSensitivity", -0.05, 0.05, 2)
 
 -- Once per engine frame, rather than a timer that can repeat/miss mouse deltas.
 LoopInGameThreadAfterFrames(1, function()
+        if transitioning then return false end
         guarded(function()
             local menuOk,menuError=pcall(serviceMenu)
             if not menuOk then
@@ -549,5 +629,5 @@ LoopInGameThreadAfterFrames(1, function()
     return false
 end)
 
-log("Loaded v0.8. Late camera=" .. tostring(lateCameraAvailable) .. "; center-camera weapon aim and direct HUD-root crosshair.")
+log("Loaded v0.8.1. Late camera=" .. tostring(lateCameraAvailable) .. "; world-exit cleanup enabled.")
 log("Settings file: " .. scriptDirectory .. "user_settings.ini")

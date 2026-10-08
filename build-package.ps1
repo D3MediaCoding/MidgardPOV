@@ -1,5 +1,5 @@
 $ErrorActionPreference='Stop'
-$taskRelease=Join-Path $PSScriptRoot 'dist\MidgardPOV-0.8'
+$taskRelease=Join-Path $PSScriptRoot 'dist\MidgardPOV-0.8.1'
 $taskPayload=Join-Path $taskRelease 'Payload'
 New-Item -ItemType Directory -Path (Join-Path $taskPayload 'Mods\MidgardFirstPerson\Scripts') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'installer\Setup.ps1'),(Join-Path $PSScriptRoot 'installer\InstallerCore.ps1'),(Join-Path $PSScriptRoot 'installer\Install.cmd') -Destination $taskRelease
@@ -18,5 +18,5 @@ foreach ($taskName in @('main','config','controls','preferences','appearance','c
 Set-Content -LiteralPath (Join-Path $taskPayload 'Mods\mods.txt') -Value 'MidgardFirstPerson : 1' -Encoding ASCII
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'installer\START-HERE.txt') -Destination $taskRelease
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'installer\LICENSE-UE4SS.txt') -Destination $taskRelease
-Compress-Archive -LiteralPath $taskRelease -DestinationPath (Join-Path $PSScriptRoot 'dist\MidgardPOV-0.8.zip') -CompressionLevel Optimal -Force
-Write-Output (Join-Path $PSScriptRoot 'dist\MidgardPOV-0.8.zip')
+Compress-Archive -LiteralPath $taskRelease -DestinationPath (Join-Path $PSScriptRoot 'dist\MidgardPOV-0.8.1.zip') -CompressionLevel Optimal -Force
+Write-Output (Join-Path $PSScriptRoot 'dist\MidgardPOV-0.8.1.zip')

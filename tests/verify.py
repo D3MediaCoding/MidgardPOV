@@ -26,6 +26,9 @@ function io.open(path, mode)
     return {write=function(self,text) files[path]=text; return self end,close=function() return true end}
 end
 function RegisterHook(path, callback) hooks[path]=callback end
+function RegisterLoadMapPreHook(callback) hooks.loadMapPre=callback end
+function RegisterLoadMapPostHook(callback) hooks.loadMapPost=callback end
+function RegisterEndPlayPreHook(callback) hooks.endPlayPre=callback end
 function print(s) table.insert(logs, s) end
 function RegisterKeyBind(k, fn) keys[k] = fn end
 function ExecuteInGameThread(fn) table.insert(work, fn) end
@@ -485,5 +488,34 @@ assert(ui.attached and #ui.images==10)
 local pieces=ui.images
 ui:destroy(); assert(not ui.attached and #ui.images==0)
 for _,piece in ipairs(pieces) do assert(piece.parent==nil) end
+-- Save-and-quit must clean up before outgoing objects become unsafe.
+pc.target=original; press(Key.F6); local outgoing=pc.target
+press(0x2D) -- also cover an open settings panel with its movement lock
+assert(pc.moveLocks==1)
+local function ref(o) return {get=function() return o end} end
+assert(hooks.loadMapPre()==nil) -- never override the engine's return value
+assert(pc.target==original and not outgoing.alive and not mesh.headHidden)
+assert(pc.moveLocks==0 and inputSettings.mappings==0)
+assert(cvars['r.Tonemapper.Sharpen']==-1 and cvars['r.MaxAnisotropy']==8)
+local findBefore=findCalls
+local oldValid=pc.IsValid
+function pc:IsValid() error('Outgoing controller must not be touched during travel') end
+tick(); press(Key.F6); press(0x2D); render()
+assert(findCalls==findBefore)
+pc.IsValid=oldValid
+assert(hooks.loadMapPost()==nil)
+press(Key.F6); assert(pc.target~=original) -- next world can enable normally
+-- Remote actor destruction must not stop local play.
+hooks.endPlayPre(ref(remote)); assert(pc.target~=original)
+hooks['/Script/Engine.KismetSystemLibrary:QuitGame']()
+assert(pc.target==original and pc.moveLocks==0 and inputSettings.mappings==0)
+hooks.loadMapPost(); press(Key.F6)
+-- Fallback EndPlay abandons references without mutating a dying pawn.
+local oldLocation=pawn.K2_GetActorLocation
+function pawn:K2_GetActorLocation() error('Dying pawn must not be queried') end
+hooks.endPlayPre(ref(pawn)); tick(); render(); press(Key.F6)
+pawn.K2_GetActorLocation=oldLocation
+hooks.loadMapPost()
+assert(inputSettings.mappings==0 and inputSettings.bEnableMouseSmoothing)
 ''')
 print("PASS: menu mouse actions, cursor/lock restoration, preferences; graphics, local projectile aim, streaming budget, camera and controls.")

@@ -2,13 +2,19 @@
 
 An unofficial beta camera, aiming and color-grading mod for the **Windows Steam edition of Tribes of Midgard**, developed against Steam build **19737805 / Unreal Engine 4.27**.
 
-This repository contains the source for the **0.8-beta** Nexus installer package. Lua and installer files were copied from that exact package. Compiled UE4SS loader binaries are upstream dependencies and are not committed here.
+This repository contains **0.8.1-beta**, including the save-and-quit cleanup fix. The original **0.8-beta** Nexus package source is preserved at [commit 5e3e670](https://github.com/D3MediaCoding/MidgardPOV/tree/5e3e670f4af83a000807cc6c43dcf279ed5e67e0). Compiled UE4SS loader binaries are upstream dependencies and are not committed here.
 
 **Nexus page:** https://www.nexusmods.com/tribesofmidgard/mods/4
 
 The Nexus page is currently unpublished and the installer ZIP is quarantined pending moderation review. This source repository does not establish that the package has passed Nexus review.
 
 ## Features
+
+### 0.8.1: save-and-quit cleanup
+
+The mod now restores the camera and detaches its HUD before map travel or QuitGame, then pauses camera, aiming, menu polling and queued controls during teardown. An EndPlay fallback drops references without invoking methods on dying actors. Engine input mappings are restored after travel, and the next world can enable the mod normally.
+
+Regression tests cover an open settings panel during travel, input/camera restoration, remote actor isolation, blocked outgoing-controller access and reactivation after loading. The user confirmed that save-and-quit from first person no longer crashed in their in-game test. This is not a guarantee for every world transition or multiplayer configuration.
 
 - First-person and over-the-shoulder third-person cameras, with a return to the original view.
 - Mouse look, including pitch, and camera-relative WASD movement.
