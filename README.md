@@ -2,7 +2,7 @@
 
 An unofficial beta camera, aiming and color-grading mod for the **Windows Steam edition of Tribes of Midgard**, developed against Steam build **19737805 / Unreal Engine 4.27**.
 
-This repository contains **0.8.1-beta** source, including the save-and-quit cleanup fix and camera-relative minimap update. The original **0.8-beta** Nexus package source is preserved at [commit 5e3e670](https://github.com/D3MediaCoding/MidgardPOV/tree/5e3e670f4af83a000807cc6c43dcf279ed5e67e0). Compiled UE4SS loader binaries are upstream dependencies and are not committed here.
+This repository contains **0.8.1-beta** source, including the save-and-quit cleanup fix and camera-relative minimap, scrolling compass and native map-pin icons. The original **0.8-beta** Nexus package source is preserved at [commit 5e3e670](https://github.com/D3MediaCoding/MidgardPOV/tree/5e3e670f4af83a000807cc6c43dcf279ed5e67e0). Compiled UE4SS loader binaries are upstream dependencies and are not committed here.
 
 **Nexus page:** https://www.nexusmods.com/tribesofmidgard/mods/4
 
@@ -12,9 +12,11 @@ The Nexus page is currently unpublished and the installer ZIP is quarantined pen
 
 ### Camera-relative minimap and compass
 
-While first- or third-person mode is active, the HUD minimap rotates with camera yaw so forward travel points toward the top of the map. An upright compass inside the minimap's bottom edge displays a cardinal direction and bearing. The heading includes the 180-degree correction identified during in-game testing. Original view restores the previous map angle and pivot and removes the compass; world-exit cleanup restores these before travel. The full-screen map is unchanged.
+While first- or third-person mode is active, the HUD minimap rotates with camera yaw so forward travel points toward the top of the map. A horizontal compass at the top center scrolls cardinal labels and intermediate bearings beneath a fixed center indicator. The heading includes the 180-degree correction identified during in-game testing. Original view restores the previous map angle and pivot and removes the compass; world-exit cleanup restores these before travel. The full-screen map is unchanged.
 
-Widget discovery runs once per camera activation/attachment. Updates use cached widgets and write only changed headings. Regression checks cover both camera modes, compass placement and removal, idle update counts, unrelated map isolation and travel cleanup. The user confirmed the corrected local update worked in-game.
+Place a pin using the game's own map controls. Its selected star, sword, shield, chest or skull artwork also appears on the compass and follows the bearing to the pin. Persistent pins use their canvas position and the game's native MapToWorldPosition conversion; their default Info coordinates do not provide their actual position. The compass copies the pin's native image brush, including changes to the selected icon, and uses a gold diamond if artwork is unavailable. Pins behind you or outside the compass strip are hidden. There are no separate waypoint controls.
+
+Widget discovery runs once per camera activation/attachment. Native pin data is sampled every 15 frames, with up to 32 symbols. Updates use cached widgets, copy positions, and change image brushes only when the source icon changes. Regression checks cover both camera modes, native coordinate conversion, existing pins, pin removal, icon changes, destroyed widgets, unrelated HUD isolation and travel cleanup. The user confirmed that map-pin tracking and matching artwork worked in-game.
 
 ### 0.8.1: save-and-quit cleanup
 
@@ -29,7 +31,7 @@ Regression tests cover an open settings panel during travel, input/camera restor
 - Original, Natural, Atmospheric and Vivid graphics presets.
 - An in-game settings panel and automatically saved preferences.
 - Optional F-key shortcuts.
-- Camera-relative minimap rotation and an integrated compass in first/third person.
+- Camera-relative minimap rotation, a scrolling compass and matching native map-pin icons in first/third person.
 - Experimental vertical launch steering for locally owned projectiles using Unreal's standard ProjectileMovementComponent.
 
 The mod adjusts existing rendering. It does not replace textures, models or lighting assets. Custom weapons, multiplayer behavior and damage across elevations need more testing. The original game assets can clip or look incomplete from these camera positions. No FPS improvement is guaranteed.
@@ -56,7 +58,7 @@ To uninstall, close the game and use **Uninstall** in the setup window. The inst
 
 ## Source layout
 
-- `Mods/MidgardFirstPerson/Scripts/`: nine active Lua modules.
+- `Mods/MidgardFirstPerson/Scripts/`: ten active Lua modules.
 - `installer/`: CMD launcher, PowerShell setup UI, install/update/uninstall implementation, user instructions and UE4SS license.
 - `staging/UE4SS-settings.ini`: tested configuration with the explicit UE4.27 override.
 - `build-package.ps1`: release packaging script; see [BUILD.md](BUILD.md).

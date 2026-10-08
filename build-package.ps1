@@ -12,7 +12,7 @@ $taskSettings=[regex]::Replace($taskSettings,'(?m)^MajorVersion\s*=.*$','MajorVe
 $taskSettings=[regex]::Replace($taskSettings,'(?m)^MinorVersion\s*=.*$','MinorVersion = 27')
 [IO.File]::WriteAllText($taskSettingsPath,$taskSettings,[Text.UTF8Encoding]::new($false))
 # Ship only active modules, never personal settings, logs or machine paths.
-foreach ($taskName in @('main','config','controls','preferences','appearance','crosshair','aim','graphics','menu')) {
+foreach ($taskName in @('main','config','controls','preferences','appearance','crosshair','aim','graphics','menu','navigation')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot "Mods\MidgardFirstPerson\Scripts\$taskName.lua") -Destination (Join-Path $taskPayload 'Mods\MidgardFirstPerson\Scripts')
 }
 Set-Content -LiteralPath (Join-Path $taskPayload 'Mods\mods.txt') -Value 'MidgardFirstPerson : 1' -Encoding ASCII

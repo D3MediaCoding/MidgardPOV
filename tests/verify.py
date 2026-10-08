@@ -225,6 +225,28 @@ mapTree=object('MinimapWidgetTree')
 miniRoot=object('MinimapRoot'); miniRoot.children={}; miniRoot.AddChildToCanvas=canvas.AddChildToCanvas
 mapTree.RootWidget=miniRoot
 function mapCanvas:GetOuter() return mapTree end
+nativeMap=object('BP_WorldmapWidget_C /Test.BP_HUD_C_123.WidgetTree.BP_HUD_Compass_127.WidgetTree.BP_WorldmapWidget')
+foreignMap=object('BP_WorldmapWidget_C /Test.BP_HUD_C_999.WidgetTree.BP_HUD_Compass_127.WidgetTree.BP_WorldmapWidget')
+pinClass=object('Class /Script/TOM.TestPingWidget')
+local pinProperty=object('StructProperty /Script/TOM.TestPingWidget:Info')
+function pinProperty:IsA(kind) return kind==PropertyTypes.StructProperty end
+function pinProperty:GetFName() return FName('Info') end
+function pinProperty:GetStruct()
+    local schema=object('ScriptStruct /Script/TOM.PingMapInfo')
+    function schema:ForEachProperty(callback)
+        local world=object('StructProperty /Script/TOM.PingMapInfo:WorldPos')
+        function world:IsA(kind) return kind==PropertyTypes.StructProperty end
+        function world:GetFName() return FName('WorldPos') end
+        function world:GetStruct() return object('ScriptStruct /Script/CoreUObject.Vector') end
+        callback(world)
+    end
+    return schema
+end
+function pinClass:ForEachProperty(callback) pinMetadataReads=(pinMetadataReads or 0)+1; callback(pinProperty) end
+function pinClass:GetSuperStruct() return nil end
+nativePin=object('NativeMapPin'); nativePin.Info={ID=1,WorldPos={X=100,Y=1200,Z=300}}
+function nativePin:GetClass() return pinClass end
+nativeMap.PingWidgets={{PingWidget=nativePin}} -- placed before the mod camera is enabled
 function StaticConstructObject(class,outer)
     assert(outer==tree or outer==mapTree)
     local image=object(class.label)
@@ -241,8 +263,11 @@ function StaticConstructObject(class,outer)
         function image:IsPressed() return self.pressed or false end
     else assert(class.label=='/Script/UMG.Image') end
     function image:SetBrushFromTexture(texture) self.texture=texture end
+    function image:SetBrush(brush) self.brush=brush; self.brushWrites=(self.brushWrites or 0)+1 end
     function image:SetColorAndOpacity(color) self.color=color end
     function image:SetVisibility(v) self.visibility=v end
+    function image:SetClipping(v) self.clipping=v end
+    function image:SetRenderTransformAngle(v) self.angle=v end
     function image:RemoveFromParent() self.parent=nil end
     return image
 end
@@ -252,6 +277,7 @@ function FindAllOf(class)
     if class=='SkeletalMeshComponent' then return {mesh} end
     if class=='StaticMeshComponent' then return {helmet,weapon} end
     if class=='CanvasPanel' then return {candidateCanvas,unrelatedMap,mapCanvas} end
+    if class=='BP_WorldmapWidget_C' then return {foreignMap,nativeMap} end
     return {}
 end
 function StaticFindObject(path)
@@ -263,14 +289,20 @@ function StaticFindObject(path)
     return object(path)
 end
 ''')
-config = (root / "Mods/MidgardFirstPerson/Scripts/config.lua").read_text()
+config = (root / "Mods/MidgardFirstPerson/Scripts/config.lua").read_text(encoding="utf-8")
 lua.globals().package.preload["config"] = lua.eval("function() " + config + " end")
-lua.globals().package.preload["controls"] = lua.eval("function() " + (root / "Mods/MidgardFirstPerson/Scripts/controls.lua").read_text() + " end")
-for module in ("appearance", "preferences", "crosshair", "aim", "graphics", "menu"):
-    lua.globals().package.preload[module] = lua.eval("function() " + (root / f"Mods/MidgardFirstPerson/Scripts/{module}.lua").read_text() + " end")
-lua.execute((root / "Mods/MidgardFirstPerson/Scripts/main.lua").read_text())
+lua.globals().package.preload["controls"] = lua.eval("function() " + (root / "Mods/MidgardFirstPerson/Scripts/controls.lua").read_text(encoding="utf-8") + " end")
+for module in ("appearance", "preferences", "crosshair", "aim", "graphics", "menu", "navigation"):
+    lua.globals().package.preload[module] = lua.eval("function() " + (root / f"Mods/MidgardFirstPerson/Scripts/{module}.lua").read_text(encoding="utf-8") + " end")
+lua.execute((root / "Mods/MidgardFirstPerson/Scripts/main.lua").read_text(encoding="utf-8"))
 lua.execute(r'''
 require('config').AimTraceIntervalFrames=1 -- immediate trace scenarios below
+local nav=require('navigation')
+assert(nav.relative(359,1)==2 and nav.relative(1,359)==-2)
+assert(nav.direction(359)=='N' and nav.direction(90)=='E')
+local bearing,distance=nav.destination({X=0,Y=0,Z=0},{X=0,Y=300,Z=400})
+assert(bearing==45 and distance==5) -- Unreal centimetres, including elevation
+assert(nav.relative(nav.heading(90),bearing)==0) -- forward lies at compass center
 assert(pc.target==original and #spawned==0) -- starts disabled
 local beginSpawn=gameplay.BeginDeferredActorSpawnFromClass
 gameplay.BeginDeferredActorSpawnFromClass=nil -- reproduce observed loader failure
@@ -409,7 +441,7 @@ pc.dy=0
 -- by mouse buttons and resumes controls without changing the camera actor.
 local menuPanel
 for _,child in ipairs(canvas.children) do
-    if child.label=='/Script/UMG.CanvasPanel' and child.parent==canvas then menuPanel=child end
+    if child.label=='/Script/UMG.CanvasPanel' and child.parent==canvas and child.slot.size.X==460 then menuPanel=child end
 end
 assert(menuPanel)
 local function menuButton(label)
@@ -505,24 +537,168 @@ pc.dx=0; pc.dy=0; for _=1,120 do tick() end -- allow HUD reattachment after resp
 assert(mapCanvas.RenderTransformPivot.X==0.5 and mapCanvas.RenderTransformPivot.Y==0.5)
 local heading=(pc.target.rotation.Yaw-45)%360
 assert(math.abs(mapCanvas.RenderTransform.Angle-(7-heading))<0.001)
-local compass
-for _,child in ipairs(miniRoot.children) do
-    if child.parent==miniRoot and child.justification==1 then compass=child end
+local compassPanel,compass
+for _,child in ipairs(canvas.children) do
+    if child.parent==canvas and child.slot.size.X==620 then compassPanel=child end
 end
-assert(compass and compass.text:find('|',1,true) and compass.visibility==3)
-assert(compass.slot.anchors.Minimum.Y==1 and compass.slot.position.Y==-8)
+assert(compassPanel and compassPanel.clipping==1 and compassPanel.slot.anchors.Minimum.X==0.5)
+for _,child in ipairs(compassPanel.children) do
+    if child.slot.position.Y==31 then compass=child end
+end
+assert(compass and compass.text:find('°',1,true) and compass.visibility==3)
+local pinSymbol
+for _,child in ipairs(compassPanel.children) do
+    if child.angle==45 and child.visibility==3 then pinSymbol=child end
+end
+assert(pinSymbol and math.abs(pinSymbol.slot.position.X-305)<0.01 and pinSymbol.color.R==1)
+assert(keys[0x72]==nil and keys[0x73]==nil and keys[0x74]==nil) -- game map is the waypoint control
+local metadataBefore=pinMetadataReads
+nativeMap.PingWidgets={} -- removing the game marker removes its compass symbol
+for _=1,15 do tick() end
+assert(pinSymbol.visibility==1)
+-- Exercise UE4SS's native array callback shape, not just plain Lua arrays.
+nativeMap.PingWidgets={ForEach=function(_,callback)
+    callback(0,{get=function() return {PingWidget=nativePin} end})
+end}
+for _=1,15 do tick() end
+assert(pinSymbol.visibility==3 and pinMetadataReads==metadataBefore)
+-- Verify the observed AddPing hook copies coordinates and isolates the HUD.
+local fallbackClass=object('Class /Script/TOM.PingWithoutExposedPosition')
+function fallbackClass:ForEachProperty() end
+function fallbackClass:GetSuperStruct() return nil end
+local fallbackPin=object('FallbackPin')
+function fallbackPin:GetClass() return fallbackClass end
+local function wrapped(value) return {get=function() return value end} end
+nativeMap.PingWidgets={{PingWidget=fallbackPin}}
+local info={ID=2,WorldPos={X=100,Y=1200,Z=300},MapPingType=0}
+hooks['/Script/TOM.WorldmapWidget:RefreshPings'](wrapped(nativeMap))
+hooks['/Script/TOM.WorldmapWidget:AddPing'](wrapped(foreignMap),wrapped(info))
+assert(#nav.mapPoints(nativeMap)==0)
+hooks['/Script/TOM.WorldmapWidget:AddPing'](wrapped(nativeMap),wrapped(info))
+info.WorldPos.Y=-1200 -- hook parameters must not be retained as borrowed references
+assert(nav.mapPoints(nativeMap)[1].Y==1200)
+nativeMap.PingWidgets={}; assert(#nav.mapPoints(nativeMap)==0)
+local markerClass=object('Class /Script/TOM.WorldmapMarkerWidget')
+function markerClass:ForEachProperty(callback) pinClass:ForEachProperty(callback) end
+function markerClass:GetSuperStruct() return nil end
+local markerIcon=object('NativeWaypointMarker')
+markerIcon.Info={ID=3,WorldPos={X=200,Y=1200,Z=300}}
+function markerIcon:GetClass() return markerClass end
+nativeMap.MarkerIcons={markerIcon}
+assert(nav.mapPoints(nativeMap)[1].X==200) -- persistent marker list is separate from pings
+markerIcon.alive=false
+assert(#nav.mapPoints(nativeMap)==0) -- no stale fallback for destroyed marker widgets
+nativeMap.MarkerIcons={}
+local dynamicClass=object('Class /Script/TOM.DynamicMapIconBaseWidget')
+function dynamicClass:GetSuperStruct() return nil end
+function dynamicClass:ForEachProperty(callback)
+    local info=object('StructProperty /Script/TOM.DynamicMapIconBaseWidget:Info')
+    function info:IsA(kind) return kind==PropertyTypes.StructProperty end
+    function info:GetFName() return FName('Info') end
+    function info:GetStruct()
+        local schema=object('ScriptStruct /Script/TOM.DynamicMapIconInfo')
+        function schema:ForEachProperty(fieldCallback)
+            local position=object('StructProperty /Script/TOM.DynamicMapIconInfo:WorldPosition')
+            function position:IsA(kind) return kind==PropertyTypes.StructProperty end
+            function position:GetFName() return FName('WorldPosition') end
+            function position:GetStruct() return object('ScriptStruct /Script/CoreUObject.Vector2D') end
+            fieldCallback(position)
+        end
+        return schema
+    end
+    callback(info)
+end
+local blueprintMarkerClass=object('WidgetBlueprintGeneratedClass /Game/BP_DynamicMarker.BP_DynamicMarker_C')
+function blueprintMarkerClass:ForEachProperty() end
+function blueprintMarkerClass:GetSuperStruct() return dynamicClass end
+local dynamicMarker=object('DynamicPin'); dynamicMarker.Info={WorldPosition={X=400,Y=1200}}
+function dynamicMarker:GetClass() return blueprintMarkerClass end
+nativeMap.MarkerIcons={dynamicMarker}
+local dynamicPoint=nav.mapPoints(nativeMap)[1]
+assert(dynamicPoint.X==400 and dynamicPoint.Y==1200 and dynamicPoint.Z==0)
+dynamicMarker.Info.WorldPosition.X=600
+assert(nav.mapPoints(nativeMap)[1].X==600) -- read current data through the cached inherited field path
+nativeMap.MarkerIcons={}
+local integerMarkerClass=object('Class /Script/TOM.IntegerPinMarker')
+function integerMarkerClass:GetSuperStruct() return nil end
+function integerMarkerClass:ForEachProperty(callback)
+    local info=object('StructProperty /Script/TOM.DynamicMapIconBaseWidget:Info')
+    function info:IsA(kind) return kind==PropertyTypes.StructProperty end
+    function info:GetFName() return FName('Info') end
+    function info:GetStruct() return object('ScriptStruct /Script/TOM.MovingNPCMapInfo') end
+    callback(info)
+end
+local integerMarker=object('IntegerPinMarker'); integerMarker.Info={X=12,Y=24}
+function integerMarker:GetClass() return integerMarkerClass end
+nativeMap.MarkerIcons={integerMarker}
+assert(#nav.mapPoints(nativeMap)==0) -- integer grid coordinates are not world centimeters
+local pinActor=object('Actor /Test.Pin')
+function pinActor:K2_GetActorLocation() return {X=12000,Y=24000,Z=50} end
+integerMarker.Info.ActorRef=pinActor
+local actorPoint=nav.mapPoints(nativeMap)[1]
+assert(actorPoint.X==12000 and actorPoint.Y==24000 and actorPoint.Z==50)
+pinActor.alive=false
+assert(#nav.mapPoints(nativeMap)==0) -- never call a destroyed pin actor
+nativeMap.MarkerIcons={}
+local canvasPinClass=object('WidgetBlueprintGeneratedClass /Game/TOM/BP_MapIcon_PinMarker.BP_MapIcon_PinMarker_C')
+function canvasPinClass:ForEachProperty() error('Canvas pin should not read its default Info struct') end
+local canvasPin=object('CanvasPin'); canvasPin.Info={X=0,Y=0}
+function canvasPin:GetClass() return canvasPinClass end
+canvasPin.Slot=object('CanvasPanelSlot /Test.PinSlot')
+canvasPin.Icon=object('Image /Test.PinIcon')
+canvasPin.Icon.Brush={ResourceObject='SwordTexture'}; canvasPin.IconId=1
+local canvasPosition={X=120,Y=-240}
+function canvasPin.Slot:GetPosition() return canvasPosition end
+local conversions=0
+function nativeMap:MapToWorldPosition(position)
+    conversions=conversions+1
+    return {X=position.X*100+300,Y=-position.Y*100+400,Z=25}
+end
+nativeMap.MarkerIcons={canvasPin}
+local canvasPoint=nav.mapPoints(nativeMap)[1]
+assert(canvasPoint.X==12300 and canvasPoint.Y==24400 and canvasPoint.Z==25)
+assert(canvasPoint.iconSource==canvasPin.Icon and canvasPoint.iconId==1)
+local iconCompass=nav.create(canvas)
+iconCompass:update(45,{X=0,Y=0,Z=0},{{X=100,Y=100,Z=0,iconSource=canvasPin.Icon,iconId=1}})
+local iconImage=iconCompass.markers[1].widget
+assert(iconImage.brush.ResourceObject=='SwordTexture' and iconImage.angle==0 and iconImage.color.G==1)
+assert(iconCompass.markers[1].slot.size.X==24)
+local brushWrites=iconImage.brushWrites
+iconCompass:update(45,{X=0,Y=0,Z=0},{{X=100,Y=100,Z=0,iconSource=canvasPin.Icon,iconId=1}})
+assert(iconImage.brushWrites==brushWrites) -- no native brush copy every frame
+canvasPin.Icon.Brush={ResourceObject='ShieldTexture'}; canvasPin.IconId=2
+iconCompass:update(45,{X=0,Y=0,Z=0},{{X=100,Y=100,Z=0,iconSource=canvasPin.Icon,iconId=2}})
+assert(iconImage.brush.ResourceObject=='ShieldTexture') -- selection changes on the same pin
+canvasPin.Icon.alive=false
+iconCompass:update(45,{X=0,Y=0,Z=0},{{X=100,Y=100,Z=0,iconSource=canvasPin.Icon,iconId=2}})
+assert(iconImage.angle==45 and iconCompass.markers[1].slot.size.X==10)
+iconCompass:destroy()
+canvasPosition.X=140
+assert(nav.mapPoints(nativeMap)[1].X==14300 and conversions==2)
+assert(canvasPoint.X==12300) -- copy the converter result; retain no native struct
+canvasPin.Slot.alive=false
+assert(#nav.mapPoints(nativeMap)==0 and conversions==2)
+nativeMap.MarkerIcons={}
+nativeMap.PingWidgets={{PingWidget=nativePin}}
+local northLabel
+for _,child in ipairs(compassPanel.children) do
+    if child.text=='N' then northLabel=child end
+end
+local northPosition=northLabel.slot.position.X
 local mapScans=scans; local mapWrites=mapCanvas.writes
 for _=1,5 do tick() end
 assert(scans==mapScans and mapCanvas.writes==mapWrites)
 pc.dx=30; tick(); pc.dx=0
 assert(mapCanvas.writes>mapWrites)
+assert(northLabel.slot.position.X<northPosition) -- headings scroll left on a right turn
 press(Key.F9); tick() -- the same rotation follows the third-person camera
-assert(compass.parent==miniRoot)
+assert(compass.parent==compassPanel and compassPanel.parent==canvas)
 press(Key.F6) -- Original view restores all map state and removes the compass
-assert(mapCanvas.RenderTransform.Angle==7 and compass.parent==nil)
+assert(mapCanvas.RenderTransform.Angle==7 and compass.parent==nil and compassPanel.parent==nil)
 assert(mapCanvas.RenderTransformPivot.X==0.2 and mapCanvas.RenderTransformPivot.Y==0.3)
 tick(); assert(mapCanvas.RenderTransform.Angle==7)
 press(Key.F6); tick(); outgoing=pc.target
+
 press(0x2D) -- also cover an open settings panel with its movement lock
 assert(pc.moveLocks==1)
 local function ref(o) return {get=function() return o end} end
@@ -537,8 +713,17 @@ function pc:IsValid() error('Outgoing controller must not be touched during trav
 tick(); press(Key.F6); press(0x2D); render()
 assert(findCalls==findBefore)
 pc.IsValid=oldValid
+nativeMap.PingWidgets={} -- the next world owns a fresh native map widget/list
 assert(hooks.loadMapPost()==nil)
 press(Key.F6); assert(pc.target~=original) -- next world can enable normally
+tick()
+for _,child in ipairs(canvas.children) do
+    if child.parent==canvas and child.slot.size.X==620 then
+        for _,marker in ipairs(child.children) do
+            if marker.angle==45 then assert(marker.visibility==1) end
+        end
+    end
+end
 -- Remote actor destruction must not stop local play.
 hooks.endPlayPre(ref(remote)); assert(pc.target~=original)
 hooks['/Script/Engine.KismetSystemLibrary:QuitGame']()

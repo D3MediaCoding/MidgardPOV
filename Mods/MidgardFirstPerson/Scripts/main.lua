@@ -8,6 +8,7 @@ local crosshair = require("crosshair")
 local aim = require("aim")
 local graphics = require("graphics")
 local menu = require("menu")
+local navigation = require("navigation")
 local scriptDirectory = debug.getinfo(1, "S").source:match("^@(.+[\\/])") or "Mods/MidgardFirstPerson/Scripts/"
 local settings = preferences.load(config, scriptDirectory .. "user_settings.ini")
 local state = nil
@@ -19,6 +20,9 @@ local menuFrame = 0
 local serviceMenu
 local transitioning = false
 local pendingInputRestore
+
+
+
 
 local function log(message)
     print("[MidgardFirstPerson] " .. tostring(message) .. "\n")
@@ -131,23 +135,7 @@ local function updateMinimap(current)
                     current.minimap={widget=widget,angle=widget.RenderTransform.Angle,
                         pivot={X=pivot.X,Y=pivot.Y}}
                     widget:SetRenderTransformPivot({X=0.5,Y=0.5})
-                    local mapTree=widget:GetOuter()
-                    local mapRoot=mapTree.RootWidget
-                    local label=StaticConstructObject(StaticFindObject("/Script/UMG.TextBlock"),mapTree)
-                    if valid(label) then
-                        current.minimap.compass=label
-                        label:SetVisibility(3) -- decorative, does not capture mouse input
-                        local font=label.Font; font.Size=16; label:SetFont(font)
-                        label:SetJustification(1)
-                        -- A sibling of the clipped map layer stays upright
-                        -- and follows the minimap's own layout and UI scale.
-                        local slot=mapRoot:AddChildToCanvas(label)
-                        slot:SetAnchors({Minimum={X=0.5,Y=1},Maximum={X=0.5,Y=1}})
-                        slot:SetAlignment({X=0.5,Y=1})
-                        slot:SetPosition({X=0,Y=-8}); slot:SetSize({X=180,Y=26})
-                        slot:SetAutoSize(false); slot:SetZOrder(20000)
-                    end
-                    log("Camera-relative minimap and compass attached.")
+                    log("Camera-relative minimap attached.")
                     break
                 end
             end
@@ -155,18 +143,12 @@ local function updateMinimap(current)
     end
     local map=current.minimap
     if not map or not valid(map.widget) then return end
-    local heading=(current.yaw-45)%360
+    local heading=navigation.heading(current.yaw)
     if not map.lastYaw or math.abs(current.yaw-map.lastYaw)>0.01 then
         map.widget:SetRenderTransformAngle(map.angle-heading)
         map.lastYaw=current.yaw
     end
-    local degree=math.floor(heading+0.5)%360
-    if valid(map.compass) and map.lastDegree~=degree then
-        local directions={"N","NE","E","SE","S","SW","W","NW"}
-        local sector=math.floor((heading+22.5)/45)%8+1
-        map.compass:SetText(FText(directions[sector] .. "  |  " .. degree .. "°"))
-        map.lastDegree=degree
-    end
+
 end
 
 local function restoreMinimap(previous)
@@ -177,7 +159,7 @@ local function restoreMinimap(previous)
         map.widget:SetRenderTransformAngle(map.angle)
         map.widget:SetRenderTransformPivot(map.pivot)
     end
-    if valid(map.compass) then map.compass:RemoveFromParent() end
+
 end
 
 local function stop(reason)
@@ -189,6 +171,7 @@ local function stop(reason)
         if not ok then log("Could not restore " .. label .. ": " .. tostring(err)) end
     end
     restore("minimap",function() restoreMinimap(previous) end)
+    restore("navigation",function() if previous.navigation then previous.navigation:destroy() end end)
     restore("view target", function()
         if valid(previous.controller) and valid(previous.camera) and
             previous.controller:GetViewTarget() == previous.camera then
@@ -349,6 +332,7 @@ local function leaveWorld(reason)
     transitioning = true
     local hadCamera = state ~= nil
     stop(reason)
+    navigation.reset()
     local ui, controller, library = menuUI, menuController, menuLibrary
     local locked, originalCursor = menuLock, menuOriginalCursor
     menuUI, menuController, menuLibrary = nil, nil, nil
@@ -376,6 +360,7 @@ local function abandonWorld(reason)
             axisMappings=state.axisMappings, mouseSmoothing=state.mouseSmoothing}
     end
     state, menuUI, menuController, menuLibrary = nil, nil, nil, nil
+    navigation.reset()
     menuLock = false
     menuFrame = 0
     log("Stopped callbacks during teardown: " .. reason)
@@ -525,6 +510,7 @@ local function toggleMenu()
     menuUI:show(true)
 end
 local function menuAction(action)
+
     if action=="first" or action=="third" or action=="original" then
         closeMenu(true)
         if action=="original" then stop("menu: original view"); return end
@@ -563,6 +549,8 @@ serviceMenu=function()
             local candidate=menu.create(controller,{action=menuAction,close=function() closeMenu(true) end,toggle=toggleMenu},log)
             if candidate.attached then
                 menuUI=candidate; menuUI.pawn=controller.Pawn
+
+
 
                 log("Mod settings ready: click the HUD button with the cursor visible, or press Insert.")
             end
@@ -696,6 +684,39 @@ LoopInGameThreadAfterFrames(1, function()
                     log("Minimap disabled after error: " .. tostring(err))
                 end
             end
+            if not current.navigationFailed and menuUI and valid(menuUI.root) then
+                local ok,err=pcall(function()
+                    if current.navigation and current.navigation.root~=menuUI.root then
+                        current.navigation:destroy(); current.navigation=nil
+                    end
+                    if not current.navigation then
+                        current.navigation=navigation.create(menuUI.root)
+                        log("Scrolling compass and waypoint navigation attached.")
+                    end
+                    if not current.mapPoints or current.frame%15==0 then
+                        local pinsOk,points=pcall(navigation.mapPoints,current.navigation.map)
+                        if pinsOk then
+                            current.mapPoints=points
+                            if current.mapPointCount~=#points then
+                                current.mapPointCount=#points
+                                log("Map pins on compass: " .. #points)
+                            end
+                        else
+                            current.mapPoints={}
+                            if not current.pinErrorReported then
+                                current.pinErrorReported=true
+                                log("Map pin read skipped: " .. tostring(points))
+                            end
+                        end
+                    end
+                    current.navigation:update(current.yaw,current.pawn:K2_GetActorLocation(),current.mapPoints)
+                end)
+                if not ok then
+                    current.navigationFailed=true
+                    if current.navigation then pcall(current.navigation.destroy,current.navigation) end
+                    log("Navigation disabled after error: " .. tostring(err))
+                end
+            end
             aim.processProjectiles(current, config, log)
             local position, rotation = viewPose(current.pawn, current)
             if current.captured then updateAim(current, position) end
@@ -705,6 +726,8 @@ LoopInGameThreadAfterFrames(1, function()
         end)
     return false
 end)
+
+navigation.install(function() return not transitioning and menuUI and menuUI.root end,log)
 
 log("Loaded v0.8.1. Late camera=" .. tostring(lateCameraAvailable) .. "; world-exit cleanup enabled.")
 log("Settings file: " .. scriptDirectory .. "user_settings.ini")

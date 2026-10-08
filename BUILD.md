@@ -23,7 +23,7 @@ From the repository root:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File build-package.ps1
 ```
 
-Output: `dist/MidgardPOV-0.8.1.zip`. The script includes nine Lua modules, the installer sources, user instructions, MIT license and the explicitly configured UE4.27 payload. It enables only `MidgardFirstPerson` in `Mods/mods.txt`.
+Output: `dist/MidgardPOV-0.8.1.zip`. The script includes ten Lua modules, the installer sources, user instructions, MIT license and the explicitly configured UE4.27 payload. It enables only `MidgardFirstPerson` in `Mods/mods.txt`.
 
 Use a fresh output directory when packaging; the script updates its staging directory rather than removing unexpected old files. Inspect the archive before uploading. A rebuild's ZIP hash can differ because archive timestamps/metadata differ; the Lua and installer source content should match the current 0.8.1-beta source. No bit-for-bit reproducible archive claim is made.
 
