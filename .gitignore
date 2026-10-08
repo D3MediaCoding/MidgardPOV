@@ -1,0 +1,19 @@
+# Local dependencies, generated packages, runtime data and test fixtures.
+vendor/
+dist/
+test-runtime/
+.venv/
+__pycache__/
+*.pyc
+*.dll
+*.exe
+*.zip
+*.7z
+*.log
+user_settings.ini
+backups/
+tests/installer-fixture-*/
+tests/fake-game/
+.midgard-pov-install.json
+installation.json
+render-distance.json

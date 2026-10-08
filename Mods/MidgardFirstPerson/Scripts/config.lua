@@ -1,0 +1,24 @@
+return {
+    FOV = 105,
+    GraphicsPreset = 3,
+    -- Unreal units are normally centimetres. Height is relative to pawn origin,
+    -- which is usually the centre of the capsule, rather than the feet.
+    EyeHeight = 65,
+    -- Clear the shoulders without shrinking the spine and its child arm bones.
+    ForwardOffset = 36,
+    Pitch = 0,
+    UpdateMilliseconds = 16,
+    HideHead = true,
+    HeadBones = {"head", "Head", "Bip001 Head", "Bip01 Head", "b_head", "head_01"},
+    MouseSensitivity = 0.30,
+    InvertMouseY = false,
+    Crosshair = true,
+    AimRayDistance = 10000,
+    AimTraceIntervalFrames = 2,
+    VerticalProjectiles = true,
+    MaxPitch = 85,
+    ThirdPersonDistance = 280,
+    ThirdPersonShoulderOffset = 45,
+    ThirdPersonHeight = 20,
+    CameraCollisionRadius = 12,
+}
