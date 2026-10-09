@@ -19,18 +19,35 @@ function graphics.create(current, log)
     end
     capture("r.Tonemapper.Sharpen","GetConsoleVariableFloatValue",0.35)
     capture("r.MaxAnisotropy","GetConsoleVariableIntValue",16)
+    local ok,distance=pcall(function() return library:GetConsoleVariableFloatValue('r.ViewDistanceScale') end)
+    if ok and type(distance)=='number' and distance>0 and distance<math.huge then
+        tracker.distance={name='r.ViewDistanceScale',value=distance}
+    else log('Render-distance override unavailable; game setting retained.') end
     local function console(entry, value)
         local ok,err=pcall(function()
             library:ExecuteConsoleCommand(current.pawn,entry.name .. " " .. tostring(value),current.controller)
         end)
         if not ok then log("Graphics console command skipped: " .. tostring(err)) end
     end
-    function tracker:restore()
+    local function restoreLook(self)
         pcall(function() self.component.PostProcessBlendWeight=0 end)
         for _,entry in ipairs(self.saved) do console(entry,entry.value) end
     end
+    function tracker:restore()
+        restoreLook(self)
+        if self.distance then console(self.distance,self.distance.value) end
+    end
+    function tracker:setRenderDistance(scale)
+        if not self.distance then return false end
+        scale=math.max(1,math.min(3,tonumber(scale) or 1))
+        if self.distanceScale~=scale then
+            console(self.distance,self.distance.value*scale)
+            self.distanceScale=scale
+        end
+        return true
+    end
     function tracker:apply(mode)
-        if mode==0 then self:restore(); return true end
+        if mode==0 then restoreLook(self); return true end
         local preset=presets[mode]
         if not preset then return false end
         local ok,err=pcall(function()

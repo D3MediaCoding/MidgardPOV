@@ -20,6 +20,8 @@ local menuFrame = 0
 local serviceMenu
 local transitioning = false
 local pendingInputRestore
+local cursorPending=false
+local cursorReadyAt=0
 
 
 
@@ -104,17 +106,20 @@ local function releaseControls(current, restoreMode)
 end
 
 local function captureControls(current)
+    if current.gameOwnsUI then return end
     -- Do not bypass pre-existing locks from cutscenes, menus or disabled input.
-    if current.controller:IsMoveInputIgnored() then
+    if not current.nativeControls and current.controller:IsMoveInputIgnored() then
         log("Movement is locked by the game. Close the menu, then press middle mouse or F8.")
         return
     end
-    current.controller:SetIgnoreMoveInput(true)
-    current.moveLock = true
+    if not current.nativeControls then
+        current.controller:SetIgnoreMoveInput(true)
+        current.moveLock = true
+    end
     current.controller.bShowMouseCursor = false
     setInputMode(function() current.widgetLibrary:SetInputMode_GameOnly(current.controller) end)
     current.captured = true
-    if current.crosshair then current.crosshair:show(settings.Crosshair) end
+    if current.crosshair then current.crosshair:show(settings.Crosshair and not current.nativeControls) end
 end
 
 -- The game rotates its map texture 45 degrees. In-game forward movement
@@ -196,7 +201,7 @@ local function stop(reason)
             previous.movement.bOrientRotationToMovement = previous.orientToMovement
             previous.movement.bUseControllerDesiredRotation = previous.desiredRotation
         end
-        if valid(previous.controller) and previous.controlRotation then
+        if valid(previous.controller) and previous.controlRotation and not previous.nativeControls then
             previous.controller:SetControlRotation(previous.controlRotation)
         end
     end)
@@ -217,7 +222,8 @@ local function start()
     if not valid(controller) then log("Enter a world before pressing F6.") return end
     local pawn = controller.Pawn
     if not valid(pawn) then log("No possessed pawn; enter a world first.") return end
-    if controller:IsMoveInputIgnored() then log("Close menus before enabling first person.") return end
+    local nativeControls=controls.nativeMovement(pawn,controller:GetViewTarget())
+    if not nativeControls and controller:IsMoveInputIgnored() then log("Close menus before enabling first person.") return end
     -- A generic actor with a CameraComponent also passes through the camera
     -- manager's BlueprintUpdateCamera event; CameraActor bypasses that event.
     local cameraClass = StaticFindObject("/Script/Engine.Actor")
@@ -253,6 +259,9 @@ local function start()
         yaw = pawn:K2_GetActorRotation().Yaw, pitch = config.Pitch,
         showCursor = controller.bShowMouseCursor,
         controlRotation = nil,
+        nativeControls = nativeControls,
+        gameChangedInputMode = nativeControls,
+        controllerName = controller:GetFullName(),
     }
     if deferred then camera = gameplay:FinishSpawningActor(camera, transform) end
     if not valid(camera) then error("CameraActor finish-spawn failed.") end
@@ -266,6 +275,7 @@ local function start()
     component:SetFieldOfView(settings.FOV)
     state.graphics=graphics.create(state,log)
     state.graphics:apply(settings.GraphicsPreset)
+    state.graphics:setRenderDistance(settings.RenderDistance)
     local position, rotation = viewPose(pawn, state)
     camera:K2_SetActorLocationAndRotation(position, rotation, false, {}, true)
     state.appearance = appearance.create(pawn, config, log)
@@ -285,10 +295,12 @@ local function start()
     if not valid(state.movement) then error("Pawn has no CharacterMovement component.") end
     state.orientToMovement = state.movement.bOrientRotationToMovement
     state.desiredRotation = state.movement.bUseControllerDesiredRotation
-    pawn.bUseControllerRotationYaw = true
+    pawn.bUseControllerRotationYaw = not nativeControls
     pawn.bUseControllerRotationPitch = false
-    state.movement.bOrientRotationToMovement = false
-    state.movement.bUseControllerDesiredRotation = false
+    if not nativeControls then
+        state.movement.bOrientRotationToMovement = false
+        state.movement.bUseControllerDesiredRotation = false
+    end
     state.inputKeys = {}
     for _, key in ipairs({"W", "A", "S", "D"}) do
         state.inputKeys[key] = {KeyName = FName(key)}
@@ -307,11 +319,11 @@ local function start()
         end
     end
     aim.prepare(state, log)
-    aim.install(function() return state end, log)
+    aim.install(function() return state and not state.nativeControls and not state.gameOwnsUI and state end, log)
     captureControls(state)
     state.crosshair = crosshair.create(controller, log)
-    state.crosshair:show(settings.Crosshair and state.captured)
-    if state.captured then updateAim(state, position) end
+    state.crosshair:show(settings.Crosshair and state.captured and not state.nativeControls)
+    if state.captured and not state.nativeControls then updateAim(state, position) end
     log("Enabled v0.9.0: " .. (settings.ThirdPerson and "third person" or "first person") ..
         ", FOV " .. settings.FOV .. ", sensitivity " .. settings.MouseSensitivity .. ". F9 switches view; middle mouse or F8 releases cursor.")
 end
@@ -459,11 +471,25 @@ RegisterKeyBind(Key.F7, function()
 end)
 
 local function toggleCursor()
+    if cursorPending then return end
+    local requestedState=state
+    local requestedEpoch=state and state.inputEpoch
+    cursorPending=true
     ExecuteInGameThread(function()
+        cursorPending=false
         guarded(function()
             if not state or (menuUI and menuUI.opened) then return end
+            if state~=requestedState or state.inputEpoch~=requestedEpoch then return end
+            if os.clock()<cursorReadyAt or state.gameOwnsUI then return end
+            -- A game UI/camera change may have happened before our next tick.
+            -- Never change focus or input mode during that transition.
+            if state.controller:GetViewTarget()~=state.camera or
+                (state.captured and state.controller.bShowMouseCursor) then return end
+            cursorReadyAt=os.clock()+0.3
             if state.captured then
-                releaseControls(state, true)
+                releaseControls(state, false)
+                state.controller.bShowMouseCursor=true
+                setInputMode(function() state.widgetLibrary:SetInputMode_GameAndUIEx(state.controller,nil,0,false) end)
                 log("Cursor released. Middle mouse or F8 resumes mouse look and camera-relative movement.")
             else
                 captureControls(state)
@@ -474,6 +500,23 @@ local function toggleCursor()
 end
 RegisterKeyBind(Key.MIDDLE_MOUSE_BUTTON, toggleCursor)
 RegisterKeyBind(Key.F8, toggleCursor)
+
+-- Native hooks only record ownership. Do not change widgets, focus, camera or
+-- movement from inside the game's input-mode call.
+for _,mode in ipairs({'GameOnly','GameAndUIEx','UIOnlyEx'}) do
+    local ok,err=pcall(RegisterHook,'/Script/UMG.WidgetBlueprintLibrary:SetInputMode_' .. mode,function(_,parameter)
+        if changingInputMode or transitioning or not state then return end
+        local current=state
+        local matched,controllerName=pcall(function() return parameter:get():GetFullName() end)
+        if not matched or controllerName~=current.controllerName then return end
+        current.inputEpoch=(current.inputEpoch or 0)+1
+        current.gameChangedInputMode=true
+        current.gameOwnsUI=mode~='GameOnly'
+        current.resumeCapture=mode=='GameOnly'
+        cursorReadyAt=os.clock()+0.3
+    end)
+    if not ok then log('Native input-mode observation unavailable: ' .. tostring(err)) end
+end
 
 local function saveSettings()
     local ok, err = settings:save()
@@ -507,11 +550,11 @@ local function toggleMenu()
         menuController:SetIgnoreMoveInput(true); menuLock=true
     end
     menuController.bShowMouseCursor=true
-    menuLibrary:SetInputMode_UIOnlyEx(menuController,nil,0)
+    setInputMode(function() menuLibrary:SetInputMode_UIOnlyEx(menuController,nil,0) end)
     menuUI:refresh(settings,state~=nil,graphics.names)
     menuUI:show(true)
 end
-local function menuAction(action)
+local function menuAction(action,value)
 
     if action=="first" or action=="third" or action=="original" then
         closeMenu(true)
@@ -530,10 +573,13 @@ local function menuAction(action)
         settings.MouseSensitivity=math.max(0.05,math.min(2,settings.MouseSensitivity+(action=="sensUp" and 0.05 or -0.05)))
     elseif action=="crosshair" then
         settings.Crosshair=not settings.Crosshair
-        if state and state.crosshair then state.crosshair:show(settings.Crosshair and state.captured) end
+        if state and state.crosshair then state.crosshair:show(settings.Crosshair and state.captured and not state.nativeControls) end
     elseif action=="graphics" then
         settings.GraphicsPreset=(settings.GraphicsPreset+1)%4
         if state and state.graphics then state.graphics:apply(settings.GraphicsPreset) end
+    elseif action=="renderDistance" then
+        settings.RenderDistance=math.max(1,math.min(3,tonumber(value) or 1))
+        if state and state.graphics then state.graphics:setRenderDistance(settings.RenderDistance) end
     elseif action=="invert" then settings.InvertMouseY=not settings.InvertMouseY end
     saveSettings()
 end
@@ -582,7 +628,7 @@ RegisterKeyBind(Key.F10, function()
                 if not state.crosshair or not state.crosshair.attached then
                     state.crosshair = crosshair.create(state.controller, log)
                 end
-                state.crosshair:show(settings.Crosshair and state.captured)
+                state.crosshair:show(settings.Crosshair and state.captured and not state.nativeControls)
             end
             saveSettings()
             log("Crosshair " .. (settings.Crosshair and "enabled" or "disabled") .. ".")
@@ -641,15 +687,45 @@ LoopInGameThreadAfterFrames(1, function()
             if current.controller.Pawn ~= current.pawn then
                 stop("pawn changed; press F6 again after respawn") return
             end
-            -- Let menus, cutscenes and other game camera transitions take over.
-            if current.controller:GetViewTarget() ~= current.camera then
-                stop("game changed its camera") return
+            local target=current.controller:GetViewTarget()
+            local native=controls.nativeMovement(current.pawn,target)
+            local wasNative=current.nativeControls
+            if native~=wasNative then
+                local captured=current.captured
+                releaseControls(current,false)
+                current.nativeControls=native
+                if native then current.gameChangedInputMode=true end
+                if native then
+                    current.pawn.bUseControllerRotationYaw=current.useControllerYaw
+                    current.movement.bOrientRotationToMovement=current.orientToMovement
+                    current.movement.bUseControllerDesiredRotation=current.desiredRotation
+                else
+                    current.pawn.bUseControllerRotationYaw=true
+                    current.movement.bOrientRotationToMovement=false
+                    current.movement.bUseControllerDesiredRotation=false
+                end
+                if captured and not current.gameOwnsUI then captureControls(current) end
+                log(native and 'Native movement active; walking and weapon aim suspended.' or 'Camera-relative walking resumed.')
             end
-            -- Observe menu cursor changes after the game's own input-mode call
-            -- finishes; avoid reflected input-mode calls inside their hooks.
+            if target~=current.camera then
+                if (native or wasNative) and not current.gameOwnsUI then
+                    current.viewTarget=target
+                    current.controller:SetViewTargetWithBlend(current.camera,0,0,0,false)
+                else
+                    current.gameChangedInputMode=true
+                    stop('game changed its camera') return
+                end
+            end
             if current.captured and current.controller.bShowMouseCursor then
                 current.gameChangedInputMode = true
-                stop("game released its mouse cursor; F6 resumes after closing the menu") return
+                current.gameOwnsUI=true
+            end
+            if current.gameOwnsUI and current.captured then
+                releaseControls(current,false)
+                current.resumeCapture=false
+            elseif current.resumeCapture and not (menuUI and menuUI.opened) and os.clock()>=cursorReadyAt then
+                current.resumeCapture=false
+                captureControls(current)
             end
             if current.captured then
                 -- This loader references the first argument for every scalar
@@ -666,8 +742,10 @@ LoopInGameThreadAfterFrames(1, function()
                 local direction, moving = controls.direction(current.yaw, down("W")-down("S"), down("D")-down("A"))
                 -- Drain residual native input once per frame. The controller's
                 -- move lock blocks normal AddMovementInput; only ours is forced.
-                current.pawn:ConsumeMovementInputVector()
-                if moving then current.pawn:AddMovementInput(direction, 1, true) end
+                if not current.nativeControls then
+                    current.pawn:ConsumeMovementInputVector()
+                    if moving then current.pawn:AddMovementInput(direction, 1, true) end
+                end
             end
             -- Allow construction to finish, then check a bounded number of
             -- individual objects. Distant streaming never triggers a world scan.
@@ -719,9 +797,9 @@ LoopInGameThreadAfterFrames(1, function()
                     log("Navigation disabled after error: " .. tostring(err))
                 end
             end
-            aim.processProjectiles(current, config, log)
+            if not current.nativeControls and not current.gameOwnsUI then aim.processProjectiles(current, config, log) end
             local position, rotation = viewPose(current.pawn, current)
-            if current.captured then updateAim(current, position) end
+            if current.captured and not current.nativeControls then updateAim(current, position) end
             if not lateCameraAvailable or not current.lateCameraFrames then
                 current.camera:K2_SetActorLocationAndRotation(position, rotation, false, {}, true)
             end

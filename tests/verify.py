@@ -9,6 +9,8 @@ from lupa import LuaRuntime
 lua = LuaRuntime()
 lua.execute(r'''
 keys, logs, work, hooks = {}, {}, {}, {}
+clock=0
+os.clock=function() return clock end
 Key = {MIDDLE_MOUSE_BUTTON=4, F6=117, F7=118, F8=119, F9=120, F10=121, F11=122}
 EFindName = {FNAME_Add=1}
 PropertyTypes = {StructProperty=1}
@@ -37,7 +39,7 @@ function drain()
     local pending=work; work={}
     for _,fn in ipairs(pending) do fn() end
 end
-function press(key) keys[key](); drain() end
+function press(key) clock=clock+0.35; keys[key](); drain() end
 function render()
     local fn=hooks['/Script/Engine.PlayerCameraManager:BlueprintUpdateCamera']
     if not fn then return end
@@ -47,7 +49,7 @@ function render()
         {get=function() return pc.target end},location,rotation,fov)
     if handled then pc.target.position=location.value; pc.target.rotation=rotation.value; pc.target.component.fov=fov.value end
 end
-function tick() loop(); drain(); render() end
+function tick() clock=clock+1/60; loop(); drain(); render() end
 function object(label)
     local o={alive=true,label=label}
     function o:IsValid() return self.alive end
@@ -82,15 +84,18 @@ function weapon:SetHiddenInGame(hidden) self.bHiddenInGame=hidden end
 pawn.bUseControllerRotationYaw=false
 pawn.bUseControllerRotationPitch=false
 movement=object('CharacterMovement')
+movement.MovementMode=1
 movement.bOrientRotationToMovement=true; movement.bUseControllerDesiredRotation=false
 pawn.CharacterMovement=movement
-function pawn:ConsumeMovementInputVector() self.move=nil end
+function pawn:ConsumeMovementInputVector() self.move=nil; self.consumes=(self.consumes or 0)+1 end
 function pawn:AddMovementInput(direction,scale,force)
     assert(force==true and scale==1 and pc.moveLocks==1)
     self.move=direction
+    self.forcedMoves=(self.forcedMoves or 0)+1
 end
 function pawn:K2_GetActorLocation() return {X=self.testX or 100,Y=200,Z=300} end
 function pawn:K2_GetActorRotation() return {Pitch=0,Yaw=90,Roll=0} end
+function pawn:GetAttachParentActor() return self.attachedBoat end
 original=object('OriginalCamera')
 pc=object('LocalController'); pc.Pawn=pawn; pc.target=original
 pc.PlayerCameraManager=object('CameraManager')
@@ -125,7 +130,7 @@ function remote:IsLocalController() return false end
 function remote:SetViewTargetWithBlend() error('remote player modified') end
 gameplay=object('GameplayStatics')
 system=object('KismetSystemLibrary')
-cvars={['r.Tonemapper.Sharpen']=-1,['r.MaxAnisotropy']=8}
+cvars={['r.Tonemapper.Sharpen']=-1,['r.MaxAnisotropy']=8,['r.ViewDistanceScale']=1.5}
 function system:GetConsoleVariableFloatValue(key) return cvars[key] end
 function system:GetConsoleVariableIntValue(key) return cvars[key] end
 function system:ExecuteConsoleCommand(context,command,controller)
@@ -159,7 +164,11 @@ function widget:SetInputMode_GameAndUIEx(controller)
     self.mode='ui'
     controller.bShowMouseCursor=true
 end
-function widget:SetInputMode_UIOnlyEx(controller) self.mode='uiOnly' end
+function widget:SetInputMode_UIOnlyEx(controller)
+    local fn=hooks['/Script/UMG.WidgetBlueprintLibrary:SetInputMode_UIOnlyEx']
+    if fn then fn(nil,{get=function() return controller end}) end
+    self.mode='uiOnly'
+end
 spawned={}
 function gameplay:BeginDeferredActorSpawnFromClass(context, class, transform, collision, owner)
     assert(context==pawn and owner==pawn and collision==1)
@@ -261,6 +270,10 @@ function StaticConstructObject(class,outer)
         function image:SetBackgroundColor(color) self.background=color end
         function image:SetContent(text) self.content=text; text.parent=self end
         function image:IsPressed() return self.pressed or false end
+    elseif class.label=='/Script/UMG.Slider' then
+        function image:SetValue(value) self.value=value end
+        function image:GetValue() return self.value end
+        function image:SetStepSize(step) self.step=step end
     else assert(class.label=='/Script/UMG.Image') end
     function image:SetBrushFromTexture(texture) self.texture=texture end
     function image:SetBrush(brush) self.brush=brush; self.brushWrites=(self.brushWrites or 0)+1 end
@@ -444,6 +457,11 @@ for _,child in ipairs(canvas.children) do
     if child.label=='/Script/UMG.CanvasPanel' and child.parent==canvas and child.slot.size.X==460 then menuPanel=child end
 end
 assert(menuPanel)
+local distanceSlider
+for _,child in ipairs(menuPanel.children) do
+    if child.label=='/Script/UMG.Slider' then distanceSlider=child end
+end
+assert(distanceSlider and distanceSlider.step==0.025)
 local function menuButton(label)
     for _,child in ipairs(menuPanel.children) do
         if child.content and child.content.text==label then return child end
@@ -456,6 +474,12 @@ end
 local menuCamera=pc.target
 press(0x2D)
 assert(menuPanel.visibility==0 and pc.bShowMouseCursor and pc.moveLocks==1 and widget.mode=='uiOnly')
+distanceSlider:SetValue(1); tick()
+for _=1,12 do tick() end
+assert(cvars['r.ViewDistanceScale']==4.5)
+distanceSlider:SetValue(0); tick()
+for _=1,12 do tick() end
+assert(cvars['r.ViewDistanceScale']==1.5)
 assert(center.visibility==1)
 local plus=menuButton('+')
 plus.pressed=true; tick(); tick()
@@ -510,7 +534,54 @@ assert(pc.target==cutscene and not active.alive and not mesh.headHidden)
 pc.target=original; press(Key.F6); active=pc.target
 widget:SetInputMode_GameAndUIEx(pc)
 tick()
-assert(pc.target==original and not active.alive and pc.moveLocks==0)
+assert(pc.target==active and active.alive and pc.moveLocks==0 and pc.bShowMouseCursor)
+local inputMode=widget.mode
+press(Key.MIDDLE_MOUSE_BUTTON)
+assert(widget.mode==inputMode and pc.bShowMouseCursor) -- workbench keeps cursor ownership
+widget:SetInputMode_GameOnly(pc); pc.bShowMouseCursor=false
+for _=1,20 do tick() end
+assert(pc.moveLocks==1 and pc.target==active)
+clock=clock+0.35
+keys[Key.MIDDLE_MOUSE_BUTTON](); keys[Key.MIDDLE_MOUSE_BUTTON](); drain()
+assert(pc.bShowMouseCursor and pc.moveLocks==0) -- queued key callbacks coalesce
+keys[Key.MIDDLE_MOUSE_BUTTON](); drain()
+assert(pc.bShowMouseCursor) -- rapid repeat does not churn native focus
+clock=clock+0.35
+keys[Key.MIDDLE_MOUSE_BUTTON]() -- game opens workbench before our callback runs
+widget:SetInputMode_UIOnlyEx(pc); pc.bShowMouseCursor=true
+drain(); tick()
+assert(widget.mode=='uiOnly' and pc.bShowMouseCursor and pc.moveLocks==0)
+press(Key.F6)
+assert(pc.target==original and not active.alive)
+-- Native rudder input must never be consumed or replaced with forced walking.
+widget:SetInputMode_GameOnly(pc)
+pc.bShowMouseCursor=true
+press(Key.F6); active=pc.target
+local boat=object('BP_Boat_C /Test.Boat'); pc.target=boat
+movement.MovementMode=6; pc.moveLocks=pc.moveLocks+1 -- game's own steering lock
+pc.down.W=true
+local forced=pawn.forcedMoves or 0; local consumed=pawn.consumes or 0
+tick()
+assert(pc.target==active and pc.moveLocks==1)
+assert((pawn.forcedMoves or 0)==forced and (pawn.consumes or 0)==consumed)
+assert(not pawn.bUseControllerRotationYaw and movement.bOrientRotationToMovement)
+pc:UpdateCharacterLookDirection({Pitch=12,Yaw=34,Roll=0})
+local nativeLook=pc.lookRotation
+assert(nativeLook.Pitch==12 and nativeLook.Yaw==34)
+press(Key.F9); tick()
+assert(pc.target==active and (pawn.forcedMoves or 0)==forced)
+movement.MovementMode=1; pc.moveLocks=pc.moveLocks-1; pc.target=original
+tick()
+assert(pc.target==active and pc.moveLocks==1 and (pawn.forcedMoves or 0)>forced)
+pc.down.W=false
+press(Key.F6)
+-- Enabling the camera while already controlling the rudder keeps its lock.
+movement.MovementMode=0; pc.target=boat; pc.moveLocks=1
+press(Key.F6); active=pc.target; tick()
+assert(active~=boat and active.alive and pc.moveLocks==1)
+press(Key.F6)
+assert(pc.target==boat and pc.moveLocks==1)
+movement.MovementMode=1; pc.moveLocks=0; pc.target=original
 pc.target=original; failSpawn=true; press(Key.F6)
 assert(pc.target==original and not spawned[#spawned].alive)
 failSpawn=false; mesh.headHidden=true
@@ -522,11 +593,17 @@ assert(logs[#logs]:find('Diagnostic END'))
 local preferences=require('preferences')
 local config=require('config')
 local prefs=preferences.load(config,'test_settings.ini')
-prefs.FOV=120; prefs.MouseSensitivity=0.6; prefs.ThirdPerson=true; prefs.Crosshair=false; prefs.GraphicsPreset=0; assert(prefs:save())
+prefs.FOV=120; prefs.MouseSensitivity=0.6; prefs.ThirdPerson=true; prefs.Crosshair=false; prefs.GraphicsPreset=0; prefs.RenderDistance=2.75; assert(prefs:save())
 local reloaded=preferences.load(config,'test_settings.ini')
 assert(reloaded.FOV==120 and reloaded.MouseSensitivity==0.6 and reloaded.ThirdPerson)
 assert(not reloaded.Crosshair)
 assert(reloaded.GraphicsPreset==0)
+assert(reloaded.RenderDistance==2.75)
+local distanceGraphics=require('graphics').create({controller=pc,pawn=pawn,systemLibrary=system,cameraComponent={PostProcessSettings={}}},function() end)
+assert(distanceGraphics:setRenderDistance(3) and cvars['r.ViewDistanceScale']==4.5)
+distanceGraphics:apply(0); assert(cvars['r.ViewDistanceScale']==4.5)
+distanceGraphics:setRenderDistance(99); assert(cvars['r.ViewDistanceScale']==4.5)
+distanceGraphics:restore(); assert(cvars['r.ViewDistanceScale']==1.5)
 local unavailable=require('graphics').create({controller=pc,pawn=pawn,systemLibrary=system,cameraComponent={}},function() end)
 assert(not unavailable:apply(3)) -- optional failure must retain camera/control mod
 assert(cvars['r.Tonemapper.Sharpen']==-1 and cvars['r.MaxAnisotropy']==8)
@@ -676,6 +753,10 @@ assert(iconCompass.markers[1].slot.size.X==24)
 local brushWrites=iconImage.brushWrites
 iconCompass:update(45,{X=0,Y=0,Z=0},{{X=100,Y=100,Z=0,iconSource=canvasPin.Icon,iconId=1}})
 assert(iconImage.brushWrites==brushWrites) -- no native brush copy every frame
+local freshWrapper=object(canvasPin.Icon:GetFullName())
+freshWrapper.Brush=canvasPin.Icon.Brush
+iconCompass:update(45,{X=0,Y=0,Z=0},{{X=100,Y=100,Z=0,iconSource=freshWrapper,iconId=1}})
+assert(iconImage.brushWrites==brushWrites) -- fresh UE4SS wrappers do not trigger another brush copy
 canvasPin.Icon.Brush={ResourceObject='ShieldTexture'}; canvasPin.IconId=2
 iconCompass:update(45,{X=0,Y=0,Z=0},{{X=100,Y=100,Z=0,iconSource=canvasPin.Icon,iconId=2}})
 assert(iconImage.brush.ResourceObject=='ShieldTexture') -- selection changes on the same pin

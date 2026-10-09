@@ -275,8 +275,11 @@ function navigation.create(root)
         local source=target and target.iconSource
         if not valid(source) then source=nil end
         local id=target and target.iconId
-        if marker.iconSource==source and marker.iconId==id then return end
-        marker.iconSource=source; marker.iconId=id
+        -- UE4SS may create a fresh Lua wrapper for the same native Image on
+        -- every read. Compare its stable object path instead of wrapper identity.
+        local sourceName=source and source:GetFullName()
+        if marker.iconSourceName==sourceName and marker.iconId==id then return end
+        marker.iconSourceName=sourceName; marker.iconId=id
         local copied=false
         if source and marker.fallbackTexture then
             local ok,err=pcall(function()
