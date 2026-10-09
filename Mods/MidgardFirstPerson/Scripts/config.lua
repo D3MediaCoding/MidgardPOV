@@ -1,7 +1,6 @@
 return {
     FOV = 105,
     GraphicsPreset = 3,
-    RenderDistance = 1,
     -- Unreal units are normally centimetres. Height is relative to pawn origin,
     -- which is usually the centre of the capsule, rather than the feet.
     EyeHeight = 65,

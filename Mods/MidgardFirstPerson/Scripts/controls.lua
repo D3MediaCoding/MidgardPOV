@@ -1,18 +1,5 @@
 -- Pure direction math shared by camera placement and movement.
 local controls = {}
-function controls.nativeMovement(pawn, viewTarget)
-    local movement=pawn.CharacterMovement
-    -- MOVE_None and MOVE_Custom mean native gameplay owns the character.
-    if movement and movement:IsValid() and (movement.MovementMode==0 or movement.MovementMode==6) then return true end
-    local function vessel(actor)
-        if not actor or not actor:IsValid() then return false end
-        local name=actor:GetFullName():lower()
-        return name:find('boat',1,true) or name:find('ship',1,true) or name:find('rudder',1,true)
-    end
-    if vessel(viewTarget) then return true end
-    local ok,parent=pcall(function() return pawn:GetAttachParentActor() end)
-    return ok and not not vessel(parent)
-end
 function controls.look(yaw, pitch, dx, dy, sensitivity, invert, limit)
     yaw = (yaw + dx * sensitivity + 180) % 360 - 180
     -- Unreal's MouseY is positive when the mouse moves upward.

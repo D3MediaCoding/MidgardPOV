@@ -1,63 +1,6 @@
 -- Native HUD controls; no delegate hooks or per-frame world scans.
 local menu = {}
 local function valid(o) return o and o:IsValid() end
-function menu.nativeUIOpen(controller)
-    local controllerName=controller:GetFullName()
-    local userClass=StaticFindObject('/Script/UMG.UserWidget')
-    local widgetClass=StaticFindObject('/Script/UMG.Widget')
-    local treeClass=StaticFindObject('/Script/UMG.WidgetTree')
-    local switchClass=StaticFindObject('/Script/UMG.WidgetSwitcher')
-    for _,candidate in ipairs(FindAllOf('UserWidget') or {}) do
-        if valid(candidate) then
-            local name=candidate:GetFullName()
-            local lower=name:lower()
-            local passive=lower:find('hud',1,true) or lower:find('crosshair',1,true) or
-                lower:find('cursor',1,true) or lower:find('compass',1,true) or lower:find('notification',1,true)
-            local topLevel=candidate:IsInViewport() and not passive
-            local modal=lower:find('maintab',1,true) or lower:find('workbench',1,true) or
-                lower:find('crafting',1,true) or lower:find('inventory',1,true) or
-                lower:find('chest',1,true) or lower:find('container',1,true) or
-                lower:find('pausemenu',1,true)
-            if topLevel or (modal and not lower:find('icon',1,true)) then
-                local node=candidate
-                for _=1,24 do
-                    if not valid(node) or not node:IsA(widgetClass) then break end
-                    local visibility=node:GetVisibility()
-                    if visibility==1 or visibility==2 then break end
-                    local opaque,opacity=pcall(function() return node:GetRenderOpacity() end)
-                    if opaque and type(opacity)=='number' and opacity<=0.01 then break end
-                    if node:IsA(userClass) and node:IsInViewport() then
-                        -- UserWidgets can stay in the viewport while their
-                        -- actual root is collapsed or faded out.
-                        local hasRoot,root=pcall(function() return node.WidgetTree.RootWidget end)
-                        if hasRoot and valid(root) then
-                            local rootVisibility=root:GetVisibility()
-                            if rootVisibility==1 or rootVisibility==2 then break end
-                            local success,alpha=pcall(function() return root:GetRenderOpacity() end)
-                            if success and type(alpha)=='number' and alpha<=0.01 then break end
-                        end
-                        local owner=node:GetOwningPlayer()
-                        if valid(owner) and owner:GetFullName()==controllerName then return true,name end
-                        break
-                    end
-                    local parent=node:GetParent()
-                    if valid(parent) then
-                        if parent:IsA(switchClass) then
-                            local active=parent:GetActiveWidget()
-                            if not valid(active) or active:GetFullName()~=node:GetFullName() then break end
-                        end
-                        node=parent
-                    else
-                        local outer=node:GetOuter()
-                        if not valid(outer) or not outer:IsA(treeClass) then break end
-                        node=outer:GetOuter()
-                    end
-                end
-            end
-        end
-    end
-    return false
-end
 local function host(controller)
     for _,candidate in ipairs(FindAllOf("CanvasPanel") or {}) do
         if valid(candidate) then
@@ -102,7 +45,7 @@ function menu.create(controller, callbacks, log)
             return slot
         end
         local panel=construct("CanvasPanel"); ui.panel=panel
-        place(root,panel,-230,-298,460,596,0.5,0.5,20010)
+        place(root,panel,-230,-258,460,516,0.5,0.5,20010)
         panel:SetVisibility(1)
         local texture=StaticFindObject("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture")
         if not valid(texture) then texture=LoadAsset("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture") end
@@ -110,7 +53,7 @@ function menu.create(controller, callbacks, log)
         background:SetBrushFromTexture(texture,false)
         background:SetColorAndOpacity({R=0.025,G=0.035,B=0.055,A=0.97})
         background:SetVisibility(0) -- block clicks falling through panel gaps
-        place(panel,background,0,0,460,596,0,0,0)
+        place(panel,background,0,0,460,516,0,0,0)
         local function text(parent,value,x,y,w,h,size)
             local label=construct("TextBlock")
             label:SetText(FText(value)); label:SetVisibility(3)
@@ -142,13 +85,8 @@ function menu.create(controller, callbacks, log)
         button(panel,"crosshair","",22,246,416,38,function() callbacks.action("crosshair") end)
         button(panel,"graphics","",22,294,416,38,function() callbacks.action("graphics") end)
         button(panel,"invert","",22,342,416,38,function() callbacks.action("invert") end)
-        ui.labels.renderDistance=text(panel,'Render distance: 1.00x',22,394,416,28)
-        local slider=construct('Slider'); ui.distanceSlider=slider
-        slider:SetValue(0); slider:SetStepSize(0.025)
-        place(panel,slider,22,427,416,28)
-        text(panel,'Higher distance can reduce performance.',22,458,416,22,13)
-        button(panel,"close","Save & return to game",22,492,416,42,function() callbacks.close() end)
-        text(panel,"Settings save automatically. Insert opens this menu.",22,552,416,30,13)
+        button(panel,"close","Save & return to game",22,400,416,42,function() callbacks.close() end)
+        text(panel,"Settings save automatically. Insert opens this menu.",22,465,416,30,13)
         button(root,"launcher","Mod settings",-158,22,136,36,function() callbacks.toggle() end,1,0,20011)
         ui.launcher=ui.buttons[#ui.buttons].widget
         ui.attached=true
@@ -161,33 +99,14 @@ function menu.create(controller, callbacks, log)
         set("crosshair","Crosshair: " .. (settings.Crosshair and "On" or "Off"))
         set("graphics","Graphics: " .. graphicsNames[settings.GraphicsPreset] .. "  >")
         set("invert","Invert vertical look: " .. (settings.InvertMouseY and "On" or "Off"))
-        self.distance=settings.RenderDistance or 1
-        self.sliderValue=(self.distance-1)/2
-        self.distanceSlider:SetValue(self.sliderValue)
-        set('renderDistance',string.format('Render distance: %.2fx',self.distance))
     end
     function ui:show(open)
-        if not open and self.sliderReadyAt then
-            self.sliderReadyAt=nil
-            callbacks.action('renderDistance',1+self.sliderValue*2)
-        end
         self.opened=open
         self.panel:SetVisibility(open and 0 or 1)
         for _,entry in ipairs(self.buttons) do entry.pressed=false end
     end
     function ui:tick()
         if not self.opened and not self.controller.bShowMouseCursor then return end
-        if self.opened and self.distanceSlider then
-            local value=math.max(0,math.min(1,self.distanceSlider:GetValue()))
-            if value~=self.sliderValue then
-                self.sliderValue=value; self.sliderReadyAt=os.clock()+0.15
-                self.labels.renderDistance:SetText(FText(string.format('Render distance: %.2fx',1+value*2)))
-            end
-            if self.sliderReadyAt and os.clock()>=self.sliderReadyAt then
-                self.sliderReadyAt=nil
-                callbacks.action('renderDistance',1+self.sliderValue*2)
-            end
-        end
         -- IsPressed is a regular UFunction; unsupported delegate hooks aren't used.
         for _,entry in ipairs(self.buttons) do
             if self.opened or entry.id=="launcher" then

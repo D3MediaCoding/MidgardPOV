@@ -18,10 +18,6 @@ Place a pin using the game's own map controls. Its selected star, sword, shield,
 
 Widget discovery runs once per camera activation/attachment. Native pin data is sampled every 15 frames, with up to 32 symbols. Updates use cached widgets, copy positions, and change image brushes only when the source icon changes. Regression checks cover both camera modes, native coordinate conversion, existing pins, pin removal, icon changes, destroyed widgets, unrelated HUD isolation and travel cleanup. The user confirmed that map-pin tracking and matching artwork worked in-game.
 
-### Native movement and rudder controls
-
-When the character uses disabled/custom native movement, is attached to a boat, or the game switches to a vessel view target, the mod yields character movement and weapon aiming to the game. It keeps the mod camera available and does not consume WASD, force walking or remove the game's own movement lock. Leaving native control resumes camera-relative walking. These paths have stand-in regression coverage; actual workbench crashes and rudder transitions still require gameplay verification on the current build.
-
 ### 0.8.1: save-and-quit cleanup
 
 The mod now restores the camera and detaches its HUD before map travel or QuitGame, then pauses camera, aiming, menu polling and queued controls during teardown. An EndPlay fallback drops references without invoking methods on dying actors. Engine input mappings are restored after travel, and the next world can enable the mod normally.
@@ -35,7 +31,6 @@ Regression tests cover an open settings panel during travel, input/camera restor
 - Original, Natural, Atmospheric and Vivid graphics presets.
 - An in-game settings panel and automatically saved preferences.
 - Optional F-key shortcuts.
-- Saved render-distance slider from 1x to 3x the existing draw-distance setting.
 - Camera-relative minimap rotation, a scrolling compass and matching native map-pin icons in first/third person.
 - Experimental vertical launch steering for locally owned projectiles using Unreal's standard ProjectileMovementComponent.
 
@@ -47,7 +42,7 @@ Download the installer ZIP from [GitHub Releases](https://github.com/D3MediaCodi
 
 When setup opens, it checks the public GitHub main branch and downloads the current Lua mod modules from a single pinned commit. Files are verified against GitHub's Git blob hashes before use. Existing installations update automatically when the game is closed; a running game or edited file stops the update. Your preferences and saves remain. Open the same Install.cmd again to check future source pushes. If GitHub is unavailable, existing installs are kept; new installs can use the bundled files offline. Changes to loader binaries or the installer require a new release download.
 
-In a world, click **Mod settings** near the upper-right corner when the cursor is visible, or press **Insert**. Choose first person or third person. Adjust FOV, sensitivity, crosshair, graphics and inverted look. Press the middle mouse button to reveal the cursor or return to mouse look while the mod camera is active. F8 remains an alternative. The toggle leaves the settings panel usable while it is open. Rapid presses are coalesced and debounced on the existing game tick. Button callbacks only record intent and enqueue no per-press Lua jobs. Cursor release/resume uses a persistent mixed game/UI input mode rather than repeatedly switching native input modes. Native input-mode hooks are not installed. The mod does not recapture focus while a displayed workbench or other game UI owns input. Camera and weapon input pause during native UI control. Cursor recapture checks displayed local game menus after a native input handoff, including hidden ancestors, inactive widget-switcher pages, faded widgets and collapsed viewport roots. Cached menus do not block ordinary mod-owned cursor toggles. Native middle-mouse action mappings are temporarily reserved while the mod camera is active, then restored on disable or travel, so the game communication radial does not compete with the cursor toggle. Closing a chest into mixed game/UI input no longer leaves the cursor toggle latched; a hidden menu can also release the guard without a new input-mode event. Preferences save automatically. **Save & return to game** or Escape closes the panel.
+In a world, click **Mod settings** near the upper-right corner when the cursor is visible, or press **Insert**. Choose first person or third person. Adjust FOV, sensitivity, crosshair, graphics and inverted look. Press the middle mouse button to reveal the cursor or return to mouse look while the mod camera is active. F8 remains an alternative. The toggle leaves the settings panel usable while it is open. Preferences save automatically. **Save & return to game** or Escape closes the panel.
 
 | Key | Action |
 | --- | --- |
@@ -62,7 +57,7 @@ In a world, click **Mod settings** near the upper-right corner when the cursor i
 | Page Up / Down | Increase/decrease FOV |
 | Home / End | Increase/decrease sensitivity |
 
-To uninstall, close the game and use **Uninstall** in the setup window. The installer checks hashes and removes only recorded mod files; preferences, backups, logs and saves remain. This release does not edit `Engine.ini`. The render-distance slider temporarily multiplies `r.ViewDistanceScale` by 1–3 while the mod camera is active, independently of the color preset. Original view and normal world exit restore the previous console value. This extends distance-culling thresholds; it does not increase game-specific world streaming, and higher values can reduce performance.
+To uninstall, close the game and use **Uninstall** in the setup window. The installer checks hashes and removes only recorded mod files; preferences, backups, logs and saves remain. This release does not edit `Engine.ini` or render distance.
 
 ## Source layout
 
