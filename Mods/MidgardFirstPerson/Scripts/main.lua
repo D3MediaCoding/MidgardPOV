@@ -403,11 +403,12 @@ lifecycle("EndPlay pre-hook", RegisterEndPlayPreHook, function(context)
 end)
 
 local function diagnostic()
-    -- Report cached Lua values only. No UObject scans, material enumeration,
-    -- equipment changes or reflected calls on the F7 path.
+    -- Report cached values here; request the bounded menu snapshot separately
+    -- on the next game tick. This diagnostic never changes input or widgets.
     log("Diagnostic BEGIN")
     log("Enabled/captured: " .. tostring(state ~= nil) .. "/" .. tostring(state and state.captured or false))
     if state then
+        state.menuProbePending = true
         log("Look yaw/pitch: " .. state.yaw .. "/" .. state.pitch)
         log("Mouse X/Y: " .. tostring(state.lastDeltaX or 0) .. "/" .. tostring(state.lastDeltaY or 0))
         log("Crosshair attached: " .. tostring(state.crosshair and state.crosshair.attached or false))
@@ -417,6 +418,29 @@ local function diagnostic()
     end
     log("FOV/sensitivity: " .. settings.FOV .. "/" .. settings.MouseSensitivity)
     log("Diagnostic END")
+end
+
+local function menuProbe(current)
+    if not current.menuProbePending then return end
+    current.menuProbePending = false
+    log("Menu snapshot BEGIN: cursor=" .. tostring(current.controller.bShowMouseCursor) ..
+        " captured=" .. tostring(current.captured) .. " moveIgnored=" .. tostring(current.controller:IsMoveInputIgnored()))
+    local function details(widget)
+        if not valid(widget) then return "<invalid>" end
+        local ok, text = pcall(function()
+            return name(widget) .. " visibility=" .. tostring(widget:GetVisibility()) ..
+                " opacity=" .. tostring(widget:GetRenderOpacity())
+        end)
+        return ok and text or (name(widget) .. " [details unavailable]")
+    end
+    local count = 0
+    for _, widget in ipairs(FindAllOf("BP_Menu_Container_C") or {}) do
+        if valid(widget) then
+            count = count + 1
+            if count <= 4 then log("Menu container: " .. details(widget)) end
+        end
+    end
+    log("Menu snapshot END: matched=" .. count .. " (maximum 4 reported)")
 end
 -- Final POV is calculated when Unreal updates its camera, using the pawn's
 -- current position rather than the pre-world-tick camera actor position.
@@ -459,21 +483,126 @@ RegisterKeyBind(Key.F7, function()
 end)
 
 local function toggleCursor()
-    ExecuteInGameThread(function()
-        guarded(function()
-            if not state or (menuUI and menuUI.opened) then return end
-            if state.captured then
-                releaseControls(state, true)
-                log("Cursor released. Middle mouse or F8 resumes mouse look and camera-relative movement.")
-            else
-                captureControls(state)
-                log("Mouse look resumed.")
-            end
-        end)
-    end)
+    -- Key callbacks only request a change. Apply it on the camera's game tick,
+    -- after native menu input has finished; repeated requests are coalesced.
+    if not transitioning and state then state.cursorTogglePending = true end
 end
 RegisterKeyBind(Key.MIDDLE_MOUSE_BUTTON, toggleCursor)
 RegisterKeyBind(Key.F8, toggleCursor)
+
+local function nativeMenuOpen(current)
+    if not valid(current.nativeMenu) and (not current.nativeMenuTried or current.frame%60==0) then
+        current.nativeMenuTried = true
+        for _, widget in ipairs(FindAllOf("BP_Menu_Container_C") or {}) do
+            if valid(widget) and name(widget):find("/Engine/Transient.",1,true) then
+                local ok, owner = pcall(function() return widget:GetOwningPlayer() end)
+                if ok and (not valid(owner) or owner == current.controller) then
+                    current.nativeMenu = widget
+                    log("Native menu container attached.")
+                    break
+                end
+            end
+        end
+    end
+    if not valid(current.nativeMenu) then return false end
+    -- The real container is hidden (1) in gameplay and visible (0) in menus.
+    -- Its cached children remain visible even when it closes; ignore them.
+    local visibility = current.nativeMenu:GetVisibility()
+    return (visibility==0 or visibility==3 or visibility==4) and current.nativeMenu:GetRenderOpacity()>0
+end
+
+local function serviceCursor(current)
+    if menuUI and menuUI.opened then
+        current.cursorTogglePending = false
+        return
+    end
+    local controller = current.controller
+    local menuOk, menuOpen = pcall(nativeMenuOpen, current)
+    if not menuOk then
+        if not current.nativeMenuError then log("Native menu check unavailable: " .. tostring(menuOpen)) end
+        current.nativeMenuError = true
+        return -- keep current input ownership if a menu cannot be checked
+    end
+    if menuOpen then
+        if current.captured then releaseControls(current, false) end
+        if not current.nativeMenuActive then
+            controller.bShowMouseCursor = true
+            setInputMode(function()
+                current.widgetLibrary:SetInputMode_GameAndUIEx(controller, nil, 0, false)
+            end)
+            log("Native menu opened: cursor shown, mouse look paused.")
+        end
+        controller.bShowMouseCursor = true
+        current.nativeMenuActive = true
+        current.nativeMenuClosing = false
+        current.menuCursor = true
+        current.manualCursor = false
+        current.gameChangedInputMode = true
+        current.cursorQuietFrames = 0
+        current.cursorTogglePending = false
+        return
+    elseif current.nativeMenuActive then
+        current.nativeMenuActive = false
+        current.nativeMenuClosing = true
+    end
+    if current.captured and controller.bShowMouseCursor then
+        -- The game owns this menu's cursor and focus. Remove only our movement
+        -- lock; leave the game's input mode, cursor and any other lock intact.
+        releaseControls(current, false)
+        current.menuCursor = true
+        current.manualCursor = false
+        current.gameChangedInputMode = true
+        current.cursorTogglePending = false
+        current.cursorQuietFrames = 0
+        log("Game menu opened: mouse look paused.")
+        return
+    end
+    if current.manualCursor and controller:IsMoveInputIgnored() then
+        current.manualCursor = false
+        current.menuCursor = true
+        current.gameChangedInputMode = true
+    end
+    if current.menuCursor then
+        if (current.nativeMenuClosing or not controller.bShowMouseCursor) and not controller:IsMoveInputIgnored() then
+            current.cursorQuietFrames = (current.cursorQuietFrames or 0) + 1
+            if current.cursorQuietFrames >= 3 then
+                captureControls(current)
+                if current.captured then
+                    current.menuCursor = false
+                    current.nativeMenuClosing = false
+                    current.gameChangedInputMode = false
+                    current.cursorTogglePending = false
+                    log("Game menu closed: mouse look resumed.")
+                end
+            end
+        else current.cursorQuietFrames = 0 end
+    end
+    if not current.cursorTogglePending then return end
+    current.cursorTogglePending = false
+    -- Never bypass a native menu/cutscene movement lock. Rate-limit manual
+    -- input-mode changes while retaining GameOnly's working mouse capture.
+    if current.frame - (current.cursorToggleFrame or -15) < 15 then return end
+    if not current.captured and controller:IsMoveInputIgnored() then return end
+    current.cursorToggleFrame = current.frame
+    if current.captured then
+        releaseControls(current, false)
+        controller.bShowMouseCursor = true
+        setInputMode(function()
+            current.widgetLibrary:SetInputMode_GameAndUIEx(controller, nil, 0, false)
+        end)
+        current.manualCursor = true
+        log("Cursor released manually. Middle mouse or F8 resumes mouse look.")
+    else
+        captureControls(current)
+        if current.captured then
+            current.manualCursor = false
+            current.menuCursor = false
+            current.nativeMenuClosing = false
+            current.gameChangedInputMode = false
+            log("Mouse look resumed.")
+        end
+    end
+end
 
 local function saveSettings()
     local ok, err = settings:save()
@@ -645,12 +774,11 @@ LoopInGameThreadAfterFrames(1, function()
             if current.controller:GetViewTarget() ~= current.camera then
                 stop("game changed its camera") return
             end
-            -- Observe menu cursor changes after the game's own input-mode call
-            -- finishes; avoid reflected input-mode calls inside their hooks.
-            if current.captured and current.controller.bShowMouseCursor then
-                current.gameChangedInputMode = true
-                stop("game released its mouse cursor; F6 resumes after closing the menu") return
+            if current.menuProbePending then
+                local ok, err = pcall(menuProbe, current)
+                if not ok then log("Menu snapshot skipped: " .. tostring(err)) end
             end
+            serviceCursor(current)
             if current.captured then
                 -- This loader references the first argument for every scalar
                 -- out parameter. Share the table so both loader behaviors work.

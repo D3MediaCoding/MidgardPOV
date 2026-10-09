@@ -37,7 +37,12 @@ function drain()
     local pending=work; work={}
     for _,fn in ipairs(pending) do fn() end
 end
-function press(key) keys[key](); drain() end
+function press(key)
+    local cursorKey=key==Key.F8 or key==Key.MIDDLE_MOUSE_BUTTON
+    if cursorKey then for _=1,15 do tick() end end
+    keys[key](); drain()
+    if cursorKey then tick() end
+end
 function render()
     local fn=hooks['/Script/Engine.PlayerCameraManager:BlueprintUpdateCamera']
     if not fn then return end
@@ -148,12 +153,15 @@ function system:SphereTraceSingle(context,start,finish,radius,channel,complex,ig
     return false
 end
 widget=object('WidgetLibrary')
+widget.modeCalls=0
 function widget:SetInputMode_GameOnly(controller)
+    self.modeCalls=self.modeCalls+1
     local fn=hooks['/Script/UMG.WidgetBlueprintLibrary:SetInputMode_GameOnly']
     if fn then fn(nil,{get=function() return controller end}) end
     self.mode='game'
 end
 function widget:SetInputMode_GameAndUIEx(controller)
+    self.modeCalls=self.modeCalls+1
     local fn=hooks['/Script/UMG.WidgetBlueprintLibrary:SetInputMode_GameAndUIEx']
     if fn then fn(nil,{get=function() return controller end}) end
     self.mode='ui'
@@ -271,6 +279,14 @@ function StaticConstructObject(class,outer)
     function image:RemoveFromParent() self.parent=nil end
     return image
 end
+nativeMenu=object('BP_Menu_Container_C /Engine/Transient.LocalMenu')
+nativeMenu.visibility=1; nativeMenu.opacity=1
+function nativeMenu:GetOwningPlayer() return pc end
+function nativeMenu:GetVisibility() return self.visibility end
+function nativeMenu:GetRenderOpacity() return self.opacity end
+remoteMenu=object('BP_Menu_Container_C /Engine/Transient.RemoteMenu')
+function remoteMenu:GetOwningPlayer() return remote end
+function remoteMenu:GetVisibility() error('Remote menu must not be polled') end
 function FindAllOf(class)
     scans=scans+1
     if class=='PlayerController' then return {remote,pc} end
@@ -278,6 +294,7 @@ function FindAllOf(class)
     if class=='StaticMeshComponent' then return {helmet,weapon} end
     if class=='CanvasPanel' then return {candidateCanvas,unrelatedMap,mapCanvas} end
     if class=='BP_WorldmapWidget_C' then return {foreignMap,nativeMap} end
+    if class=='BP_Menu_Container_C' then return {remoteMenu,nativeMenu} end
     return {}
 end
 function StaticFindObject(path)
@@ -509,7 +526,72 @@ local cutscene=object('Cutscene'); pc.target=cutscene; tick()
 assert(pc.target==cutscene and not active.alive and not mesh.headHidden)
 pc.target=original; press(Key.F6); active=pc.target
 widget:SetInputMode_GameAndUIEx(pc)
+pc:SetIgnoreMoveInput(true) -- chest/inventory's own movement lock
+local nativeModeCalls=widget.modeCalls
 tick()
+assert(pc.target==active and active.alive and pc.moveLocks==1 and pc.bShowMouseCursor)
+assert(widget.modeCalls==nativeModeCalls) -- opening must not rewrite native focus
+for _=1,1000 do keys[Key.MIDDLE_MOUSE_BUTTON]() end
+tick()
+assert(pc.moveLocks==1 and pc.bShowMouseCursor and widget.modeCalls==nativeModeCalls)
+pc.bShowMouseCursor=false
+for _=1,5 do tick() end
+assert(pc.moveLocks==1 and widget.modeCalls==nativeModeCalls) -- lock still belongs to game
+pc:SetIgnoreMoveInput(false)
+tick(); tick()
+assert(pc.moveLocks==0)
+tick()
+assert(pc.target==active and pc.moveLocks==1 and not pc.bShowMouseCursor and widget.mode=='game')
+assert(widget.modeCalls==nativeModeCalls+1)
+pc.dx=2; tick(); assert(pc.rotation.Yaw~=90); pc.dx=0
+-- Menus that expose the cursor without a movement lock also suspend/resume.
+widget:SetInputMode_GameAndUIEx(pc); tick()
+assert(pc.target==active and pc.moveLocks==0)
+pc.bShowMouseCursor=false; tick(); tick(); tick()
+assert(pc.moveLocks==1 and widget.mode=='game')
+-- Manual toggles use the tick, coalesce bursts and keep the cursor visible.
+for _=1,15 do tick() end
+local beforeToggle=widget.modeCalls
+for _=1,1000 do keys[Key.F8]() end
+assert(widget.modeCalls==beforeToggle and not pc.bShowMouseCursor)
+tick(); assert(pc.bShowMouseCursor and pc.moveLocks==0 and widget.modeCalls==beforeToggle+1)
+for _=1,1000 do keys[Key.F8]() end
+tick(); assert(pc.bShowMouseCursor and widget.modeCalls==beforeToggle+1)
+press(Key.F8); assert(not pc.bShowMouseCursor and pc.moveLocks==1 and widget.mode=='game')
+-- The real game leaves bShowMouseCursor false when its menu container opens.
+-- Observe the container itself, not permanently visible cached descendants.
+local menuCalls=widget.modeCalls
+nativeMenu.visibility=0
+tick()
+assert(pc.target==active and pc.bShowMouseCursor and pc.moveLocks==0 and widget.mode=='ui')
+assert(widget.modeCalls==menuCalls+1)
+for _=1,1000 do keys[Key.MIDDLE_MOUSE_BUTTON]() end
+tick(); tick()
+assert(pc.bShowMouseCursor and pc.moveLocks==0 and widget.modeCalls==menuCalls+1)
+-- Close while our shown cursor is still true. Return to GameOnly capture.
+nativeMenu.visibility=1
+tick(); tick(); tick()
+assert(not pc.bShowMouseCursor and pc.moveLocks==1 and widget.mode=='game')
+assert(widget.modeCalls==menuCalls+2)
+-- Never resume early if closing leaves a native lock behind.
+nativeMenu.visibility=0; tick(); pc:SetIgnoreMoveInput(true)
+nativeMenu.visibility=1
+for _=1,6 do tick() end
+assert(pc.bShowMouseCursor and pc.moveLocks==1 and widget.mode=='ui')
+pc:SetIgnoreMoveInput(false); tick(); tick(); tick()
+assert(not pc.bShowMouseCursor and pc.moveLocks==1 and widget.mode=='game')
+-- Hidden or fully transparent cached containers do not steal mouse look.
+nativeMenu.visibility=2; tick(); assert(not pc.bShowMouseCursor)
+nativeMenu.visibility=0; nativeMenu.opacity=0; tick(); assert(not pc.bShowMouseCursor)
+nativeMenu.visibility=1; nativeMenu.opacity=1
+local scansBeforeMenu=scans
+for _=1,100 do
+    nativeMenu.visibility=0; tick(); tick()
+    nativeMenu.visibility=1; tick(); tick(); tick()
+    assert(pc.target==active and pc.moveLocks==1 and widget.mode=='game')
+end
+assert(scans==scansBeforeMenu) -- cached container polling does not rescan widgets
+press(Key.F6)
 assert(pc.target==original and not active.alive and pc.moveLocks==0)
 pc.target=original; failSpawn=true; press(Key.F6)
 assert(pc.target==original and not spawned[#spawned].alive)
