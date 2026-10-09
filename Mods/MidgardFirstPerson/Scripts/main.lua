@@ -21,6 +21,7 @@ local serviceMenu
 local transitioning = false
 local pendingInputRestore
 local cursorPending=false
+local cursorRequestState
 local cursorReadyAt=0
 
 
@@ -116,8 +117,11 @@ local function captureControls(current)
         current.controller:SetIgnoreMoveInput(true)
         current.moveLock = true
     end
+    if not current.controlsModeReady then
+        setInputMode(function() current.widgetLibrary:SetInputMode_GameAndUIEx(current.controller,nil,0,false) end)
+        current.controlsModeReady=true
+    end
     current.controller.bShowMouseCursor = false
-    setInputMode(function() current.widgetLibrary:SetInputMode_GameOnly(current.controller) end)
     current.captured = true
     current.freeCursorOwned=false
     if current.crosshair then current.crosshair:show(settings.Crosshair and not current.nativeControls) end
@@ -493,23 +497,26 @@ RegisterKeyBind(Key.F7, function()
 end)
 
 local function toggleCursor()
-    if cursorPending then return end
-    local requestedState=state
-    local requestedEpoch=state and state.inputEpoch
+    -- Key callbacks only record intent. No UObject calls or queued Lua jobs.
     cursorPending=true
-    ExecuteInGameThread(function()
-        cursorPending=false
-        guarded(function()
+    cursorRequestState=state
+end
+local function processCursor()
+    if not cursorPending then return end
+    cursorPending=false
+    guarded(function()
             if not state or (menuUI and menuUI.opened) then return end
-            if state~=requestedState or state.inputEpoch~=requestedEpoch then return end
+            if state~=cursorRequestState then return end
             if os.clock()<cursorReadyAt then return end
             cursorReadyAt=os.clock()+0.3
             local open,widgetName=false,nil
-            if state.gameOwnsUI or state.checkNativeUI or (not state.captured and not state.freeCursorOwned) then
+            if state.gameOwnsUI or not state.captured then
                 open,widgetName=menu.nativeUIOpen(state.controller)
             end
             if open then
                 state.gameOwnsUI=true
+                state.controlsModeReady=false
+                state.freeCursorOwned=false
                 if state.blockedUIName~=widgetName then
                     state.blockedUIName=widgetName
                     log('Cursor remains with game menu: ' .. widgetName)
@@ -530,38 +537,15 @@ local function toggleCursor()
                 releaseControls(state, false)
                 state.controller.bShowMouseCursor=true
                 state.freeCursorOwned=true
-                setInputMode(function() state.widgetLibrary:SetInputMode_GameAndUIEx(state.controller,nil,0,false) end)
                 log("Cursor released. Middle mouse or F8 resumes mouse look and camera-relative movement.")
             else
                 captureControls(state)
                 log("Mouse look resumed.")
             end
-        end)
     end)
 end
 RegisterKeyBind(Key.MIDDLE_MOUSE_BUTTON, toggleCursor)
 RegisterKeyBind(Key.F8, toggleCursor)
-
--- Native hooks only record ownership. Do not change widgets, focus, camera or
--- movement from inside the game's input-mode call.
-for _,mode in ipairs({'GameOnly','GameAndUIEx','UIOnlyEx'}) do
-    local ok,err=pcall(RegisterHook,'/Script/UMG.WidgetBlueprintLibrary:SetInputMode_' .. mode,function(_,parameter)
-        if changingInputMode or transitioning or not state then return end
-        local current=state
-        local matched,controllerName=pcall(function() return parameter:get():GetFullName() end)
-        if not matched or controllerName~=current.controllerName then return end
-        current.inputEpoch=(current.inputEpoch or 0)+1
-        current.gameChangedInputMode=true
-        current.freeCursorOwned=false
-        -- Mixed input is also the game's normal state after closing a chest.
-        -- Confirm visible menu ownership later on the game thread instead.
-        current.checkNativeUI=mode~='GameOnly'
-        if mode=='GameOnly' then current.gameOwnsUI=false end
-        current.resumeCapture=mode=='GameOnly'
-        cursorReadyAt=os.clock()+0.3
-    end)
-    if not ok then log('Native input-mode observation unavailable: ' .. tostring(err)) end
-end
 
 local function saveSettings()
     local ok, err = settings:save()
@@ -590,6 +574,7 @@ local function toggleMenu()
     if not menuUI or not menuUI.attached then log("Enter a world to open Mod settings."); return end
     if menuUI.opened then closeMenu(true); return end
     menuOriginalCursor=menuController.bShowMouseCursor
+    if state then state.controlsModeReady=false end
     if state and state.captured then releaseControls(state,false) end
     if not menuController:IsMoveInputIgnored() then
         menuController:SetIgnoreMoveInput(true); menuLock=true
@@ -723,7 +708,7 @@ LoopInGameThreadAfterFrames(1, function()
                 if menuUI then pcall(menuUI.destroy,menuUI); menuUI=nil end
                 menuFrame=1 -- wait before retrying without stopping camera
             end
-            if not state then return end
+            if not state then cursorPending=false; return end
             local current = state
             current.frame = current.frame + 1
             if not valid(current.controller) or not valid(current.pawn) or not valid(current.camera) then
@@ -732,12 +717,9 @@ LoopInGameThreadAfterFrames(1, function()
             if current.controller.Pawn ~= current.pawn then
                 stop("pawn changed; press F6 again after respawn") return
             end
+            processCursor()
+            if state~=current then return end
             local target=current.controller:GetViewTarget()
-            if current.checkNativeUI then
-                current.checkNativeUI=false
-                local open=menu.nativeUIOpen(current.controller)
-                current.gameOwnsUI=open
-            end
             local native=controls.nativeMovement(current.pawn,target)
             local wasNative=current.nativeControls
             if native~=wasNative then
@@ -769,13 +751,11 @@ LoopInGameThreadAfterFrames(1, function()
             if current.captured and current.controller.bShowMouseCursor then
                 current.gameChangedInputMode = true
                 current.gameOwnsUI=true
+                current.freeCursorOwned=false
+                current.controlsModeReady=false
             end
             if current.gameOwnsUI and current.captured then
                 releaseControls(current,false)
-                current.resumeCapture=false
-            elseif current.resumeCapture and not (menuUI and menuUI.opened) and os.clock()>=cursorReadyAt then
-                current.resumeCapture=false
-                captureControls(current)
             end
             if current.captured then
                 -- This loader references the first argument for every scalar

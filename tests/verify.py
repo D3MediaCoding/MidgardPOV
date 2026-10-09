@@ -39,7 +39,10 @@ function drain()
     local pending=work; work={}
     for _,fn in ipairs(pending) do fn() end
 end
-function press(key) clock=clock+0.35; keys[key](); drain() end
+function press(key)
+    clock=clock+0.35; keys[key](); drain()
+    if key==Key.MIDDLE_MOUSE_BUTTON or key==Key.F8 then tick() end
+end
 function render()
     local fn=hooks['/Script/Engine.PlayerCameraManager:BlueprintUpdateCamera']
     if not fn then return end
@@ -170,17 +173,20 @@ function system:SphereTraceSingle(context,start,finish,radius,channel,complex,ig
 end
 widget=object('WidgetLibrary')
 function widget:SetInputMode_GameOnly(controller)
+    self.modeCalls=(self.modeCalls or 0)+1
     local fn=hooks['/Script/UMG.WidgetBlueprintLibrary:SetInputMode_GameOnly']
     if fn then fn(nil,{get=function() return controller end}) end
     self.mode='game'
 end
 function widget:SetInputMode_GameAndUIEx(controller)
+    self.modeCalls=(self.modeCalls or 0)+1
     local fn=hooks['/Script/UMG.WidgetBlueprintLibrary:SetInputMode_GameAndUIEx']
     if fn then fn(nil,{get=function() return controller end}) end
     self.mode='ui'
     controller.bShowMouseCursor=true
 end
 function widget:SetInputMode_UIOnlyEx(controller)
+    self.modeCalls=(self.modeCalls or 0)+1
     local fn=hooks['/Script/UMG.WidgetBlueprintLibrary:SetInputMode_UIOnlyEx']
     if fn then fn(nil,{get=function() return controller end}) end
     self.mode='uiOnly'
@@ -461,7 +467,7 @@ assert(flight.Velocity.Z==0 and flight.bConstrainToPlane)
 aimHit=nil; tick()
 pawn.testX=300; render(); assert(math.abs(pc.target.position.X-300)<0.001)
 pawn.testX=nil; render()
-assert(pc.moveLocks==1 and not pc.bShowMouseCursor and widget.mode=='game')
+assert(pc.moveLocks==1 and not pc.bShowMouseCursor and widget.mode=='ui')
 pc.down.W=true; tick()
 assert(math.abs(pawn.move.X)<0.0001 and math.abs(pawn.move.Y-1)<0.0001)
 pc.down.W=false; pc.down.D=true; tick()
@@ -523,18 +529,31 @@ click(invertButton); assert(invertButton.content.text=='Invert vertical look: On
 click(invertButton)
 click(menuButton('Save & return to game'))
 assert(pc.target==menuCamera and menuPanel.visibility==1 and not pc.bShowMouseCursor)
-assert(pc.moveLocks==1 and widget.mode=='game' and center.visibility==3)
+assert(pc.moveLocks==1 and widget.mode=='ui' and center.visibility==3)
 press(0x2D); press(0x1B)
 assert(menuPanel.visibility==1 and pc.moveLocks==1 and not pc.bShowMouseCursor)
-gameModal.visibility=0 -- cached widgets do not own input without a native handoff
+gameModal.visibility=0; gameModal.opacity=0 -- cached faded widgets do not own input
 press(Key.F8); assert(pc.moveLocks==0 and pc.bShowMouseCursor and widget.mode=='ui')
 assert(center.visibility==1)
-press(Key.F8); assert(pc.moveLocks==1 and not pc.bShowMouseCursor and widget.mode=='game')
-gameModal.visibility=1
+press(Key.F8); assert(pc.moveLocks==1 and not pc.bShowMouseCursor and widget.mode=='ui')
+gameModal.visibility=1; gameModal.opacity=1
 press(Key.MIDDLE_MOUSE_BUTTON)
 assert(pc.moveLocks==0 and pc.bShowMouseCursor and widget.mode=='ui' and center.visibility==1)
 press(Key.MIDDLE_MOUSE_BUTTON)
-assert(pc.moveLocks==1 and not pc.bShowMouseCursor and widget.mode=='game' and center.visibility==3)
+assert(pc.moveLocks==1 and not pc.bShowMouseCursor and widget.mode=='ui' and center.visibility==3)
+local stableModeCalls=widget.modeCalls
+local stableCamera=pc.target
+for _=1,200 do
+    clock=clock+0.35
+    for _=1,20 do keys[Key.MIDDLE_MOUSE_BUTTON]() end
+    assert(#work==0) -- no per-key native callback jobs
+    tick()
+    assert(pc.target==stableCamera and stableCamera.alive and pc.moveLocks>=0 and pc.moveLocks<=1)
+end
+assert(widget.modeCalls==stableModeCalls and pc.moveLocks==1 and not pc.bShowMouseCursor)
+assert(hooks['/Script/UMG.WidgetBlueprintLibrary:SetInputMode_GameOnly']==nil)
+assert(hooks['/Script/UMG.WidgetBlueprintLibrary:SetInputMode_GameAndUIEx']==nil)
+assert(hooks['/Script/UMG.WidgetBlueprintLibrary:SetInputMode_UIOnlyEx']==nil)
 press(0x2D)
 press(Key.MIDDLE_MOUSE_BUTTON)
 assert(menuPanel.visibility==0 and pc.bShowMouseCursor and pc.moveLocks==1)
@@ -577,9 +596,9 @@ widget:SetInputMode_GameAndUIEx(pc)
 tick(); press(Key.MIDDLE_MOUSE_BUTTON)
 assert(pc.moveLocks==1 and pc.target==active)
 clock=clock+0.35
-keys[Key.MIDDLE_MOUSE_BUTTON](); keys[Key.MIDDLE_MOUSE_BUTTON](); drain()
+keys[Key.MIDDLE_MOUSE_BUTTON](); keys[Key.MIDDLE_MOUSE_BUTTON](); drain(); tick(); tick()
 assert(pc.bShowMouseCursor and pc.moveLocks==0) -- queued key callbacks coalesce
-keys[Key.MIDDLE_MOUSE_BUTTON](); drain()
+keys[Key.MIDDLE_MOUSE_BUTTON](); drain(); tick()
 assert(pc.bShowMouseCursor) -- rapid repeat does not churn native focus
 clock=clock+0.35
 keys[Key.MIDDLE_MOUSE_BUTTON]() -- game opens workbench before our callback runs
