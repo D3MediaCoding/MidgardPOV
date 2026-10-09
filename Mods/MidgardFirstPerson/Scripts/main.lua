@@ -106,7 +106,7 @@ end
 local function captureControls(current)
     -- Do not bypass pre-existing locks from cutscenes, menus or disabled input.
     if current.controller:IsMoveInputIgnored() then
-        log("Movement is locked by the game. Close the menu, then press F8.")
+        log("Movement is locked by the game. Close the menu, then press middle mouse or F8.")
         return
     end
     current.controller:SetIgnoreMoveInput(true)
@@ -313,7 +313,7 @@ local function start()
     state.crosshair:show(settings.Crosshair and state.captured)
     if state.captured then updateAim(state, position) end
     log("Enabled v0.8.1: " .. (settings.ThirdPerson and "third person" or "first person") ..
-        ", FOV " .. settings.FOV .. ", sensitivity " .. settings.MouseSensitivity .. ". F9 switches view; F8 releases cursor.")
+        ", FOV " .. settings.FOV .. ", sensitivity " .. settings.MouseSensitivity .. ". F9 switches view; middle mouse or F8 releases cursor.")
 end
 
 local function guarded(callback)
@@ -458,20 +458,22 @@ RegisterKeyBind(Key.F7, function()
     ExecuteInGameThread(function() guarded(diagnostic) end)
 end)
 
-RegisterKeyBind(Key.F8, function()
+local function toggleCursor()
     ExecuteInGameThread(function()
         guarded(function()
-            if not state then return end
+            if not state or (menuUI and menuUI.opened) then return end
             if state.captured then
                 releaseControls(state, true)
-                log("Cursor released. F8 resumes mouse look and camera-relative movement.")
+                log("Cursor released. Middle mouse or F8 resumes mouse look and camera-relative movement.")
             else
                 captureControls(state)
                 log("Mouse look resumed.")
             end
         end)
     end)
-end)
+end
+RegisterKeyBind(Key.MIDDLE_MOUSE_BUTTON, toggleCursor)
+RegisterKeyBind(Key.F8, toggleCursor)
 
 local function saveSettings()
     local ok, err = settings:save()

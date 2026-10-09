@@ -40,14 +40,15 @@ The mod adjusts existing rendering. It does not replace textures, models or ligh
 
 Use the complete installer package once its release is available. Close the game, extract the whole ZIP, and run `Install.cmd`. Select the game folder and click **Install / Update**. A clean install uses the loader bundled in the release; unrelated loader installations are rejected for manual merging.
 
-In a world, click **Mod settings** near the upper-right corner when the cursor is visible, or press **Insert**. Choose first person or third person. Adjust FOV, sensitivity, crosshair, graphics and inverted look. Preferences save automatically. **Save & return to game** or Escape closes the panel.
+In a world, click **Mod settings** near the upper-right corner when the cursor is visible, or press **Insert**. Choose first person or third person. Adjust FOV, sensitivity, crosshair, graphics and inverted look. Press the middle mouse button to reveal the cursor or return to mouse look while the mod camera is active. F8 remains an alternative. The toggle leaves the settings panel usable while it is open. Preferences save automatically. **Save & return to game** or Escape closes the panel.
 
 | Key | Action |
 | --- | --- |
 | Insert | Open/close settings |
 | F6 | Toggle mod camera |
 | F7 | Write cached diagnostics |
-| F8 | Release/resume mouse cursor |
+| Middle mouse button | Release/resume mouse cursor |
+| F8 | Release/resume mouse cursor (alternative) |
 | F9 | Switch first/third person |
 | F10 | Toggle crosshair |
 | F11 | Cycle graphics presets |

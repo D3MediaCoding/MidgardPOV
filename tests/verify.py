@@ -9,7 +9,7 @@ from lupa import LuaRuntime
 lua = LuaRuntime()
 lua.execute(r'''
 keys, logs, work, hooks = {}, {}, {}, {}
-Key = {F6=117, F7=118, F8=119, F9=120, F10=121, F11=122}
+Key = {MIDDLE_MOUSE_BUTTON=4, F6=117, F7=118, F8=119, F9=120, F10=121, F11=122}
 EFindName = {FNAME_Add=1}
 PropertyTypes = {StructProperty=1}
 notifications={}
@@ -477,11 +477,21 @@ assert(menuPanel.visibility==1 and pc.moveLocks==1 and not pc.bShowMouseCursor)
 press(Key.F8); assert(pc.moveLocks==0 and pc.bShowMouseCursor and widget.mode=='ui')
 assert(center.visibility==1)
 press(Key.F8); assert(pc.moveLocks==1 and not pc.bShowMouseCursor and widget.mode=='game')
+press(Key.MIDDLE_MOUSE_BUTTON)
+assert(pc.moveLocks==0 and pc.bShowMouseCursor and widget.mode=='ui' and center.visibility==1)
+press(Key.MIDDLE_MOUSE_BUTTON)
+assert(pc.moveLocks==1 and not pc.bShowMouseCursor and widget.mode=='game' and center.visibility==3)
+press(0x2D)
+press(Key.MIDDLE_MOUSE_BUTTON)
+assert(menuPanel.visibility==0 and pc.bShowMouseCursor and pc.moveLocks==1)
+press(0x1B)
 press(Key.F6)
 assert(center.parent==nil)
 assert(pc.target==original and not mesh.headHidden and not helmet.bHiddenInGame and not spawned[1].alive)
 assert(pc.moveLocks==0 and pc.bShowMouseCursor and widget.mode=='ui')
 assert(inputSettings.mappings==0)
+press(Key.MIDDLE_MOUSE_BUTTON)
+assert(pc.target==original and pc.bShowMouseCursor) -- inactive camera leaves game input alone
 assert(inputSettings.bEnableMouseSmoothing)
 assert(cvars['r.Tonemapper.Sharpen']==-1 and cvars['r.MaxAnisotropy']==8)
 assert(not pawn.bUseControllerRotationYaw and movement.bOrientRotationToMovement)

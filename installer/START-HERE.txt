@@ -8,7 +8,7 @@ MIDGARD POV 0.8.1 — Windows Steam edition
 5. Set your FOV, sensitivity, crosshair, graphics preset and inverted look.
    Settings save automatically. Save & return to game closes the menu.
 
-Shortcuts (optional): F6 toggle camera; F7 diagnostics; F8 free/resume cursor;
+Shortcuts (optional): F6 toggle camera; F7 diagnostics; middle mouse or F8 free/resume cursor;
 F9 switch view; F10 crosshair; F11 graphics; Page Up/Down FOV;
 Home/End sensitivity. Insert toggles menu. Escape closes the mod menu.
 
