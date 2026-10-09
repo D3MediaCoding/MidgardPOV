@@ -24,7 +24,18 @@ function menu.nativeUIOpen(controller)
                     if not valid(node) or not node:IsA(widgetClass) then break end
                     local visibility=node:GetVisibility()
                     if visibility==1 or visibility==2 then break end
+                    local opaque,opacity=pcall(function() return node:GetRenderOpacity() end)
+                    if opaque and type(opacity)=='number' and opacity<=0.01 then break end
                     if node:IsA(userClass) and node:IsInViewport() then
+                        -- UserWidgets can stay in the viewport while their
+                        -- actual root is collapsed or faded out.
+                        local hasRoot,root=pcall(function() return node.WidgetTree.RootWidget end)
+                        if hasRoot and valid(root) then
+                            local rootVisibility=root:GetVisibility()
+                            if rootVisibility==1 or rootVisibility==2 then break end
+                            local success,alpha=pcall(function() return root:GetRenderOpacity() end)
+                            if success and type(alpha)=='number' and alpha<=0.01 then break end
+                        end
                         local owner=node:GetOwningPlayer()
                         if valid(owner) and owner:GetFullName()==controllerName then return true,name end
                         break

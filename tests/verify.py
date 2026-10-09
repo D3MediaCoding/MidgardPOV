@@ -145,6 +145,22 @@ function system:LineTraceSingle(context,start,finish,channel,complex,ignore,draw
     return false
 end
 inputSettings=object('InputSettings'); inputSettings.mappings=0; inputSettings.bEnableMouseSmoothing=true
+inputSettings.ActionMappings={
+    {ActionName=FName('Communication'),Key={KeyName=FName('MiddleMouseButton')},bShift=false,bCtrl=false,bAlt=false,bCmd=false},
+    {ActionName=FName('CommunicationShift'),Key={KeyName=FName('MiddleMouseButton')},bShift=true,bCtrl=false,bAlt=false,bCmd=false},
+    {ActionName=FName('Interact'),Key={KeyName=FName('E')},bShift=false,bCtrl=false,bAlt=false,bCmd=false}}
+function inputSettings:RemoveActionMapping(mapping,rebuild)
+    assert(rebuild)
+    for i,existing in ipairs(self.ActionMappings) do
+        if existing.ActionName==mapping.ActionName then table.remove(self.ActionMappings,i); return end
+    end
+    error('Missing native action')
+end
+function inputSettings:AddActionMapping(mapping,rebuild)
+    assert(rebuild)
+    for _,existing in ipairs(self.ActionMappings) do assert(existing.ActionName~=mapping.ActionName) end
+    table.insert(self.ActionMappings,mapping)
+end
 function inputSettings:AddAxisMapping(mapping,rebuild) assert(rebuild); self.mappings=self.mappings+1 end
 function inputSettings:RemoveAxisMapping(mapping,rebuild) assert(rebuild); self.mappings=self.mappings-1 end
 function system:SphereTraceSingle(context,start,finish,radius,channel,complex,ignored,draw,hit)
@@ -222,6 +238,7 @@ function viewportWidget:IsInViewport() return true end
 gameModal=object('BP_ChestPanel_C /Test.NativeChest'); gameModal.visibility=1
 function gameModal:IsInViewport() return true end
 function gameModal:GetVisibility() return self.visibility end
+function gameModal:GetRenderOpacity() return self.opacity or 1 end
 function gameModal:GetOwningPlayer() return self.owner or pc end
 function gameModal:IsA(class) return class.label=='/Script/UMG.UserWidget' or class.label=='/Script/UMG.Widget' end
 hiddenModalParent=object('CanvasPanel /Test.NativeChestParent'); hiddenModalParent.visibility=0
@@ -509,9 +526,11 @@ assert(pc.target==menuCamera and menuPanel.visibility==1 and not pc.bShowMouseCu
 assert(pc.moveLocks==1 and widget.mode=='game' and center.visibility==3)
 press(0x2D); press(0x1B)
 assert(menuPanel.visibility==1 and pc.moveLocks==1 and not pc.bShowMouseCursor)
+gameModal.visibility=0 -- cached widgets do not own input without a native handoff
 press(Key.F8); assert(pc.moveLocks==0 and pc.bShowMouseCursor and widget.mode=='ui')
 assert(center.visibility==1)
 press(Key.F8); assert(pc.moveLocks==1 and not pc.bShowMouseCursor and widget.mode=='game')
+gameModal.visibility=1
 press(Key.MIDDLE_MOUSE_BUTTON)
 assert(pc.moveLocks==0 and pc.bShowMouseCursor and widget.mode=='ui' and center.visibility==1)
 press(Key.MIDDLE_MOUSE_BUTTON)
@@ -525,6 +544,7 @@ assert(center.parent==nil)
 assert(pc.target==original and not mesh.headHidden and not helmet.bHiddenInGame and not spawned[1].alive)
 assert(pc.moveLocks==0 and pc.bShowMouseCursor and widget.mode=='ui')
 assert(inputSettings.mappings==0)
+assert(#inputSettings.ActionMappings==3) -- native mouse actions restored without duplicates
 press(Key.MIDDLE_MOUSE_BUTTON)
 assert(pc.target==original and pc.bShowMouseCursor) -- inactive camera leaves game input alone
 assert(inputSettings.bEnableMouseSmoothing)
@@ -536,6 +556,7 @@ assert(pawn.ProjectileTargetPosition.X==11 and pawn.AimPitch==7 and pawn.bAutoTa
 assert(not pawn.bAutoRotationIgnoreVelocity)
 assert(pc.SelectedTarget==originalAimActor and pawn.ProjectileTargetActor==originalAimActor)
 press(Key.F6); local active=pc.target
+assert(#inputSettings.ActionMappings==1 and inputSettings.ActionMappings[1].ActionName==FName('Interact'))
 pc.Pawn=object('RespawnPawn'); tick()
 assert(pc.target==original and not active.alive and not mesh.headHidden)
 pc.Pawn=pawn
@@ -580,6 +601,14 @@ hiddenModalParent.visibility=0
 assert(require('menu').nativeUIOpen(pc))
 gameModal.visibility=1
 function gameModal:IsInViewport() return true end
+gameModal.visibility=0; gameModal.opacity=0
+assert(not require('menu').nativeUIOpen(pc)) -- invisible persistent communication radial
+gameModal.opacity=1
+local cachedRoot=object('CanvasPanel /Test.CachedChestRoot')
+function cachedRoot:GetVisibility() return 1 end
+gameModal.WidgetTree={RootWidget=cachedRoot}
+assert(not require('menu').nativeUIOpen(pc)) -- collapsed root on a persistent viewport widget
+gameModal.WidgetTree=nil; gameModal.visibility=1
 press(Key.F6)
 assert(pc.target==original and not active.alive)
 -- Native rudder input must never be consumed or replaced with forced walking.
@@ -856,5 +885,6 @@ hooks.endPlayPre(ref(pawn)); tick(); render(); press(Key.F6)
 pawn.K2_GetActorLocation=oldLocation
 hooks.loadMapPost()
 assert(inputSettings.mappings==0 and inputSettings.bEnableMouseSmoothing)
+assert(#inputSettings.ActionMappings==3)
 ''')
 print("PASS: menu mouse actions, cursor/lock restoration, preferences; graphics, local projectile aim, streaming budget, camera and controls.")

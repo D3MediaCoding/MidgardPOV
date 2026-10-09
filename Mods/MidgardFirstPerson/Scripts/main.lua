@@ -119,6 +119,7 @@ local function captureControls(current)
     current.controller.bShowMouseCursor = false
     setInputMode(function() current.widgetLibrary:SetInputMode_GameOnly(current.controller) end)
     current.captured = true
+    current.freeCursorOwned=false
     if current.crosshair then current.crosshair:show(settings.Crosshair and not current.nativeControls) end
 end
 
@@ -208,6 +209,7 @@ local function stop(reason)
     restore("temporary mouse mappings", function()
         if valid(previous.inputSettings) then
             for _, mapping in ipairs(previous.axisMappings or {}) do previous.inputSettings:RemoveAxisMapping(mapping, true) end
+            for _, mapping in ipairs(previous.mouseActions or {}) do previous.inputSettings:AddActionMapping(mapping,true) end
             if previous.mouseSmoothing ~= nil then previous.inputSettings.bEnableMouseSmoothing = previous.mouseSmoothing end
         end
     end)
@@ -308,9 +310,28 @@ local function start()
     state.mouseDelta = {}
     state.inputSettings = StaticFindObject("/Script/Engine.Default__InputSettings")
     state.axisMappings = {}
+    state.mouseActions = {}
     if valid(state.inputSettings) then
         state.mouseSmoothing = state.inputSettings.bEnableMouseSmoothing
         state.inputSettings.bEnableMouseSmoothing = false
+        local ok,err=pcall(function()
+            local mappings=state.inputSettings.ActionMappings
+            local reserved={}
+            local function remember(mapping)
+                if mapping.Key.KeyName:ToString()~='MiddleMouseButton' then return end
+                reserved[#reserved+1]={ActionName=FName(mapping.ActionName:ToString()),
+                    Key={KeyName=FName('MiddleMouseButton')},bShift=mapping.bShift,bCtrl=mapping.bCtrl,bAlt=mapping.bAlt,bCmd=mapping.bCmd}
+            end
+            if type(mappings)=='table' and not mappings.ForEach then
+                for _,mapping in ipairs(mappings) do remember(mapping) end
+            elseif mappings then mappings:ForEach(function(_,mapping) remember(mapping:get()) end) end
+            for _,mapping in ipairs(reserved) do
+                state.inputSettings:RemoveActionMapping(mapping,true)
+                state.mouseActions[#state.mouseActions+1]=mapping
+                log('Middle mouse reserved for cursor toggle: ' .. mapping.ActionName:ToString())
+            end
+        end)
+        if not ok then log('Middle-mouse native mapping reservation skipped: ' .. tostring(err)) end
         for _, axis in ipairs({"X", "Y"}) do
             local mapping = {AxisName=FName("MidgardLook" .. axis, EFindName.FNAME_Add),
                 Key={KeyName=FName("Mouse" .. axis)}, Scale=1}
@@ -369,7 +390,7 @@ local function abandonWorld(reason)
     transitioning = true
     if state then
         pendingInputRestore = {inputSettings=state.inputSettings,
-            axisMappings=state.axisMappings, mouseSmoothing=state.mouseSmoothing}
+            axisMappings=state.axisMappings, mouseActions=state.mouseActions, mouseSmoothing=state.mouseSmoothing}
     end
     state, menuUI, menuController, menuLibrary = nil, nil, nil, nil
     navigation.reset()
@@ -394,6 +415,7 @@ lifecycle("LoadMap post-hook", RegisterLoadMapPostHook, function()
             for _,mapping in ipairs(pending.axisMappings or {}) do
                 pending.inputSettings:RemoveAxisMapping(mapping,true)
             end
+            for _,mapping in ipairs(pending.mouseActions or {}) do pending.inputSettings:AddActionMapping(mapping,true) end
             if pending.mouseSmoothing~=nil then
                 pending.inputSettings.bEnableMouseSmoothing=pending.mouseSmoothing
             end
@@ -482,7 +504,10 @@ local function toggleCursor()
             if state~=requestedState or state.inputEpoch~=requestedEpoch then return end
             if os.clock()<cursorReadyAt then return end
             cursorReadyAt=os.clock()+0.3
-            local open,widgetName=menu.nativeUIOpen(state.controller)
+            local open,widgetName=false,nil
+            if state.gameOwnsUI or state.checkNativeUI or (not state.captured and not state.freeCursorOwned) then
+                open,widgetName=menu.nativeUIOpen(state.controller)
+            end
             if open then
                 state.gameOwnsUI=true
                 if state.blockedUIName~=widgetName then
@@ -504,6 +529,7 @@ local function toggleCursor()
             if state.captured then
                 releaseControls(state, false)
                 state.controller.bShowMouseCursor=true
+                state.freeCursorOwned=true
                 setInputMode(function() state.widgetLibrary:SetInputMode_GameAndUIEx(state.controller,nil,0,false) end)
                 log("Cursor released. Middle mouse or F8 resumes mouse look and camera-relative movement.")
             else
@@ -526,9 +552,11 @@ for _,mode in ipairs({'GameOnly','GameAndUIEx','UIOnlyEx'}) do
         if not matched or controllerName~=current.controllerName then return end
         current.inputEpoch=(current.inputEpoch or 0)+1
         current.gameChangedInputMode=true
+        current.freeCursorOwned=false
         -- Mixed input is also the game's normal state after closing a chest.
         -- Confirm visible menu ownership later on the game thread instead.
-        current.checkNativeUI=true
+        current.checkNativeUI=mode~='GameOnly'
+        if mode=='GameOnly' then current.gameOwnsUI=false end
         current.resumeCapture=mode=='GameOnly'
         cursorReadyAt=os.clock()+0.3
     end)
