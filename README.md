@@ -2,7 +2,7 @@
 
 An unofficial beta camera, aiming and color-grading mod for the **Windows Steam edition of Tribes of Midgard**, developed against Steam build **19737805 / Unreal Engine 4.27**.
 
-This repository contains **0.8.1-beta** source, including the save-and-quit cleanup fix and camera-relative minimap, scrolling compass and native map-pin icons. The original **0.8-beta** Nexus package source is preserved at [commit 5e3e670](https://github.com/D3MediaCoding/MidgardPOV/tree/5e3e670f4af83a000807cc6c43dcf279ed5e67e0). Compiled UE4SS loader binaries are upstream dependencies and are not committed here.
+This repository contains **0.9.0-beta** source, including the save-and-quit cleanup fix and camera-relative minimap, scrolling compass and native map-pin icons. The original **0.8-beta** Nexus package source is preserved at [commit 5e3e670](https://github.com/D3MediaCoding/MidgardPOV/tree/5e3e670f4af83a000807cc6c43dcf279ed5e67e0). Compiled UE4SS loader binaries are upstream dependencies and are not committed here.
 
 **Nexus page:** https://www.nexusmods.com/tribesofmidgard/mods/4
 
@@ -38,7 +38,9 @@ The mod adjusts existing rendering. It does not replace textures, models or ligh
 
 ## Installation and controls
 
-Use the complete installer package once its release is available. Close the game, extract the whole ZIP, and run `Install.cmd`. Select the game folder and click **Install / Update**. A clean install uses the loader bundled in the release; unrelated loader installations are rejected for manual merging.
+Download the installer ZIP from [GitHub Releases](https://github.com/D3MediaCoding/MidgardPOV/releases/tag/v0.9.0-beta). This first release is a beta. Close the game, extract the whole ZIP, and run `Install.cmd`. Select the game folder and click **Install / Update**. A clean install uses the loader bundled in the release; unrelated loader installations are rejected for manual merging.
+
+When setup opens, it checks the public GitHub main branch and downloads the current Lua mod modules from a single pinned commit. Files are verified against GitHub's Git blob hashes before use. Existing installations update automatically when the game is closed; a running game or edited file stops the update. Your preferences and saves remain. Open the same Install.cmd again to check future source pushes. If GitHub is unavailable, existing installs are kept; new installs can use the bundled files offline. Changes to loader binaries or the installer require a new release download.
 
 In a world, click **Mod settings** near the upper-right corner when the cursor is visible, or press **Insert**. Choose first person or third person. Adjust FOV, sensitivity, crosshair, graphics and inverted look. Press the middle mouse button to reveal the cursor or return to mouse look while the mod camera is active. F8 remains an alternative. The toggle leaves the settings panel usable while it is open. Preferences save automatically. **Save & return to game** or Escape closes the panel.
 
@@ -91,7 +93,7 @@ The installer test preserves its isolated fixture and backups as test evidence. 
 
 ## Security review and credits
 
-The installer copies an offline payload into the selected game's `TOM/Binaries/Win64` directory. It checks for a running game and unrelated existing loaders, records relative owned paths and hashes, and supports backup/update/uninstall. It does not download dependencies. The CMD launcher starts the PowerShell UI with process-scoped `-ExecutionPolicy Bypass`; it does not change the machine's policy. Normal installation does not request administrator privileges.
+The installer copies an offline payload into the selected game's `TOM/Binaries/Win64` directory. It checks for a running game and unrelated existing loaders, records relative owned paths and hashes, and supports backup/update/uninstall. The loader is bundled offline. Setup downloads only the public repository Lua modules over HTTPS, pinned to one commit and checked against its Git blob hashes; it does not fetch or execute replacement setup scripts. The CMD launcher starts the PowerShell UI with process-scoped `-ExecutionPolicy Bypass`; it does not change the machine's policy. Normal installation does not request administrator privileges.
 
 Concept, direction and gameplay testing: **botDanka**. Lua implementation, packaging, tests and documentation were generated with AI assistance through **OpenAI Codex**. UE4SS is developed by its upstream contributors and is distributed under its included MIT license. See [LICENSE.md](LICENSE.md) for the distinction between this mod's permissions and third-party permissions.
 

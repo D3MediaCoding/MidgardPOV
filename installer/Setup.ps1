@@ -4,6 +4,10 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [Windows.Forms.Application]::EnableVisualStyles()
 . (Join-Path $PSScriptRoot 'InstallerCore.ps1')
+. (Join-Path $PSScriptRoot 'UpdateCore.ps1')
+$taskSelectedPayload=Join-Path $PSScriptRoot 'Payload'
+$taskSelectedRevision=''
+$taskOnlineReady=$false
 function Find-Midgard {
     $taskSteam=(Get-ItemProperty -LiteralPath 'HKCU:\Software\Valve\Steam' -ErrorAction SilentlyContinue).SteamPath
     $taskLibraries=@($taskSteam,'C:\Program Files (x86)\Steam') | Where-Object { $_ }
@@ -49,7 +53,13 @@ $taskStatus=New-Object Windows.Forms.Label
 $taskStatus.Location=New-Object Drawing.Point(22,212); $taskStatus.Size=New-Object Drawing.Size(555,70)
 $taskStatus.Text='Close the game first. After installation, enter a world and click Mod settings or press Insert.'
 $taskInstall.Add_Click({
-    try { $taskStatus.Text=Install-Midgard $taskPath.Text (Join-Path $PSScriptRoot 'Payload') }
+    try {
+        if (-not $taskOnlineReady) {
+            $taskRecordPath=Join-Path (Get-MidgardDestination $taskPath.Text) '.midgard-pov-install.json'
+            if (Test-Path -LiteralPath $taskRecordPath) { throw 'Reopen setup when GitHub is available to update an existing installation.' }
+        }
+        $taskStatus.Text=Install-Midgard $taskPath.Text $taskSelectedPayload $taskSelectedRevision
+    }
     catch { [Windows.Forms.MessageBox]::Show($_.Exception.Message,'Installation stopped','OK','Error') | Out-Null }
 })
 $taskUninstall.Add_Click({
@@ -57,5 +67,39 @@ $taskUninstall.Add_Click({
     catch { [Windows.Forms.MessageBox]::Show($_.Exception.Message,'Uninstall stopped','OK','Error') | Out-Null }
 })
 $taskForm.Controls.AddRange(@($taskTitle,$taskInfo,$taskPath,$taskBrowse,$taskInstall,$taskUninstall,$taskStatus))
+$taskForm.Add_Shown({
+    $taskInstall.Enabled=$false; $taskUninstall.Enabled=$false
+    $taskStatus.Text='Checking GitHub for the latest mod update...'
+    [Windows.Forms.Application]::DoEvents()
+    try {
+        $taskLatest=Get-MidgardOnlinePayload (Join-Path $PSScriptRoot 'Payload') (Join-Path $env:LOCALAPPDATA 'MidgardPOV\Updates')
+        $script:taskSelectedPayload=$taskLatest.Payload
+        $script:taskSelectedRevision=$taskLatest.Revision
+        $script:taskOnlineReady=$true
+        $taskStatus.Text='Latest GitHub mod files verified. Close the game and click Install / Update.'
+        if ($taskPath.Text) {
+            $taskInstalledRecord=Join-Path (Get-MidgardDestination $taskPath.Text) '.midgard-pov-install.json'
+            if (Test-Path -LiteralPath $taskInstalledRecord) {
+                $taskInstalled=Get-Content -LiteralPath $taskInstalledRecord -Raw | ConvertFrom-Json
+                if ($taskInstalled.Product -eq 'MidgardPOV' -and $taskInstalled.SourceRevision -ne $taskLatest.Revision) {
+                    $taskStatus.Text=Install-Midgard $taskPath.Text $taskSelectedPayload $taskSelectedRevision
+                } else { $taskStatus.Text='Your mod is up to date with GitHub.' }
+            }
+        }
+    } catch {
+        $taskStatus.Text='Update check: '+$_.Exception.Message+' The bundled installer remains available.'
+    } finally {
+        $taskInstall.Enabled=$true; $taskUninstall.Enabled=$true
+        if (-not $taskOnlineReady -and $taskPath.Text) {
+            try {
+                $taskExisting=Join-Path (Get-MidgardDestination $taskPath.Text) '.midgard-pov-install.json'
+                if (Test-Path -LiteralPath $taskExisting) {
+                    $taskInstall.Enabled=$false
+                    $taskStatus.Text='GitHub could not be checked. Your installed mod was kept. Reopen setup when online to update.'
+                }
+            } catch { }
+        }
+    }
+})
 [void]$taskForm.ShowDialog()
 $taskForm.Dispose()

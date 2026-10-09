@@ -17,7 +17,7 @@ function Get-MidgardPath([string]$Root,[string]$Relative) {
 function Assert-MidgardClosed {
     if (Get-Process -Name 'TOM-Win64-Shipping','TOM' -ErrorAction SilentlyContinue) { throw 'Close Tribes of Midgard before installing or uninstalling.' }
 }
-function Install-Midgard([string]$GameFolder,[string]$Payload) {
+function Install-Midgard([string]$GameFolder,[string]$Payload,[string]$SourceRevision='') {
     Assert-MidgardClosed
     $taskRoot=Get-MidgardDestination $GameFolder
     $taskManifestPath=Join-Path $taskRoot '.midgard-pov-install.json'
@@ -57,9 +57,10 @@ function Install-Midgard([string]$GameFolder,[string]$Payload) {
             $taskChanged+=[pscustomobject]@{Target=$taskChange.Target;Backup=$taskBackupPath;Existed=$taskExisted}
             New-Item -ItemType Directory -Path (Split-Path -Parent $taskChange.Target) -Force | Out-Null
             Copy-Item -LiteralPath $taskChange.Source -Destination $taskChange.Target
+            if ((Get-FileHash -LiteralPath $taskChange.Target -Algorithm SHA256).Hash -ne $taskChange.SHA256) { throw "Installed file verification failed: $($taskChange.Path)" }
         }
         foreach ($taskChange in $taskPlan) { $taskOld[$taskChange.Path]=[pscustomobject]@{Path=$taskChange.Path;SHA256=$taskChange.SHA256} }
-        $taskRecord=[pscustomobject]@{Product='MidgardPOV';Version='0.8.1';Files=@($taskOld.Values)}
+        $taskRecord=[pscustomobject]@{Product='MidgardPOV';Version='0.9.0';SourceRevision=$SourceRevision;Files=@($taskOld.Values)}
         $taskTemporary=$taskManifestPath+'.tmp'
         $taskRecord | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $taskTemporary -Encoding UTF8
         Move-Item -LiteralPath $taskTemporary -Destination $taskManifestPath -Force
@@ -71,7 +72,7 @@ function Install-Midgard([string]$GameFolder,[string]$Payload) {
         }
         throw
     }
-    return "Installed Midgard POV 0.8.1. Launch the game, enter a world, and open Mod settings or press Insert."
+    return "Installed Midgard POV 0.9.0. Launch the game, enter a world, and open Mod settings or press Insert."
 }
 function Uninstall-Midgard([string]$GameFolder) {
     Assert-MidgardClosed

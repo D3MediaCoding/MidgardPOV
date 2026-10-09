@@ -13,6 +13,7 @@ __pycache__/
 user_settings.ini
 backups/
 tests/installer-fixture-*/
+tests/updater-fixture-*/
 tests/fake-game/
 .midgard-pov-install.json
 installation.json

@@ -312,7 +312,7 @@ local function start()
     state.crosshair = crosshair.create(controller, log)
     state.crosshair:show(settings.Crosshair and state.captured)
     if state.captured then updateAim(state, position) end
-    log("Enabled v0.8.1: " .. (settings.ThirdPerson and "third person" or "first person") ..
+    log("Enabled v0.9.0: " .. (settings.ThirdPerson and "third person" or "first person") ..
         ", FOV " .. settings.FOV .. ", sensitivity " .. settings.MouseSensitivity .. ". F9 switches view; middle mouse or F8 releases cursor.")
 end
 
@@ -731,5 +731,5 @@ end)
 
 navigation.install(function() return not transitioning and menuUI and menuUI.root end,log)
 
-log("Loaded v0.8.1. Late camera=" .. tostring(lateCameraAvailable) .. "; world-exit cleanup enabled.")
+log("Loaded v0.9.0. Late camera=" .. tostring(lateCameraAvailable) .. "; world-exit cleanup enabled.")
 log("Settings file: " .. scriptDirectory .. "user_settings.ini")
