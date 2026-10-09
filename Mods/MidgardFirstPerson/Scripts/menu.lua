@@ -1,6 +1,52 @@
 -- Native HUD controls; no delegate hooks or per-frame world scans.
 local menu = {}
 local function valid(o) return o and o:IsValid() end
+function menu.nativeUIOpen(controller)
+    local controllerName=controller:GetFullName()
+    local userClass=StaticFindObject('/Script/UMG.UserWidget')
+    local widgetClass=StaticFindObject('/Script/UMG.Widget')
+    local treeClass=StaticFindObject('/Script/UMG.WidgetTree')
+    local switchClass=StaticFindObject('/Script/UMG.WidgetSwitcher')
+    for _,candidate in ipairs(FindAllOf('UserWidget') or {}) do
+        if valid(candidate) then
+            local name=candidate:GetFullName()
+            local lower=name:lower()
+            local passive=lower:find('hud',1,true) or lower:find('crosshair',1,true) or
+                lower:find('cursor',1,true) or lower:find('compass',1,true) or lower:find('notification',1,true)
+            local topLevel=candidate:IsInViewport() and not passive
+            local modal=lower:find('maintab',1,true) or lower:find('workbench',1,true) or
+                lower:find('crafting',1,true) or lower:find('inventory',1,true) or
+                lower:find('chest',1,true) or lower:find('container',1,true) or
+                lower:find('pausemenu',1,true)
+            if topLevel or (modal and not lower:find('icon',1,true)) then
+                local node=candidate
+                for _=1,24 do
+                    if not valid(node) or not node:IsA(widgetClass) then break end
+                    local visibility=node:GetVisibility()
+                    if visibility==1 or visibility==2 then break end
+                    if node:IsA(userClass) and node:IsInViewport() then
+                        local owner=node:GetOwningPlayer()
+                        if valid(owner) and owner:GetFullName()==controllerName then return true,name end
+                        break
+                    end
+                    local parent=node:GetParent()
+                    if valid(parent) then
+                        if parent:IsA(switchClass) then
+                            local active=parent:GetActiveWidget()
+                            if not valid(active) or active:GetFullName()~=node:GetFullName() then break end
+                        end
+                        node=parent
+                    else
+                        local outer=node:GetOuter()
+                        if not valid(outer) or not outer:IsA(treeClass) then break end
+                        node=outer:GetOuter()
+                    end
+                end
+            end
+        end
+    end
+    return false
+end
 local function host(controller)
     for _,candidate in ipairs(FindAllOf("CanvasPanel") or {}) do
         if valid(candidate) then

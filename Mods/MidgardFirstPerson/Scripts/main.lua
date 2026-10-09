@@ -480,7 +480,22 @@ local function toggleCursor()
         guarded(function()
             if not state or (menuUI and menuUI.opened) then return end
             if state~=requestedState or state.inputEpoch~=requestedEpoch then return end
-            if os.clock()<cursorReadyAt or state.gameOwnsUI then return end
+            if os.clock()<cursorReadyAt then return end
+            cursorReadyAt=os.clock()+0.3
+            local open,widgetName=menu.nativeUIOpen(state.controller)
+            if open then
+                state.gameOwnsUI=true
+                if state.blockedUIName~=widgetName then
+                    state.blockedUIName=widgetName
+                    log('Cursor remains with game menu: ' .. widgetName)
+                end
+                return
+            end
+            if state.gameOwnsUI then
+                if state.controller:IsMoveInputIgnored() and not state.moveLock and not state.nativeControls then return end
+                state.gameOwnsUI=false; state.blockedUIName=nil
+                log('Game menu closed; cursor toggle available again.')
+            end
             -- A game UI/camera change may have happened before our next tick.
             -- Never change focus or input mode during that transition.
             if state.controller:GetViewTarget()~=state.camera or
@@ -511,7 +526,9 @@ for _,mode in ipairs({'GameOnly','GameAndUIEx','UIOnlyEx'}) do
         if not matched or controllerName~=current.controllerName then return end
         current.inputEpoch=(current.inputEpoch or 0)+1
         current.gameChangedInputMode=true
-        current.gameOwnsUI=mode~='GameOnly'
+        -- Mixed input is also the game's normal state after closing a chest.
+        -- Confirm visible menu ownership later on the game thread instead.
+        current.checkNativeUI=true
         current.resumeCapture=mode=='GameOnly'
         cursorReadyAt=os.clock()+0.3
     end)
@@ -688,6 +705,11 @@ LoopInGameThreadAfterFrames(1, function()
                 stop("pawn changed; press F6 again after respawn") return
             end
             local target=current.controller:GetViewTarget()
+            if current.checkNativeUI then
+                current.checkNativeUI=false
+                local open=menu.nativeUIOpen(current.controller)
+                current.gameOwnsUI=open
+            end
             local native=controls.nativeMovement(current.pawn,target)
             local wasNative=current.nativeControls
             if native~=wasNative then

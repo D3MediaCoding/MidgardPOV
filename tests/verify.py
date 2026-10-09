@@ -216,9 +216,19 @@ function slate:GetLocalSize(geometry) return geometry end
 function canvas:GetOuter() return tree end
 function tree:GetOuter() return viewportWidget end
 function tree:IsA(class) return class.label=='/Script/UMG.WidgetTree' end
-function viewportWidget:IsA(class) return class.label=='/Script/UMG.UserWidget' end
+function viewportWidget:IsA(class) return class.label=='/Script/UMG.UserWidget' or class.label=='/Script/UMG.Widget' end
 function viewportWidget:GetOwningPlayer() return pc end
 function viewportWidget:IsInViewport() return true end
+gameModal=object('BP_ChestPanel_C /Test.NativeChest'); gameModal.visibility=1
+function gameModal:IsInViewport() return true end
+function gameModal:GetVisibility() return self.visibility end
+function gameModal:GetOwningPlayer() return self.owner or pc end
+function gameModal:IsA(class) return class.label=='/Script/UMG.UserWidget' or class.label=='/Script/UMG.Widget' end
+hiddenModalParent=object('CanvasPanel /Test.NativeChestParent'); hiddenModalParent.visibility=0
+function hiddenModalParent:IsA(class) return class.label=='/Script/UMG.Widget' end
+function hiddenModalParent:GetVisibility() return self.visibility end
+function hiddenModalParent:GetParent() return viewportWidget end
+function gameModal:GetParent() return hiddenModalParent end
 function canvas:AddChildToCanvas(image)
     image.parent=self; table.insert(self.children,image)
     local slot=object('CanvasSlot'); image.slot=slot
@@ -291,6 +301,7 @@ function FindAllOf(class)
     if class=='StaticMeshComponent' then return {helmet,weapon} end
     if class=='CanvasPanel' then return {candidateCanvas,unrelatedMap,mapCanvas} end
     if class=='BP_WorldmapWidget_C' then return {foreignMap,nativeMap} end
+    if class=='UserWidget' then return {viewportWidget,gameModal} end
     return {}
 end
 function StaticFindObject(path)
@@ -532,14 +543,17 @@ press(Key.F6); active=pc.target
 local cutscene=object('Cutscene'); pc.target=cutscene; tick()
 assert(pc.target==cutscene and not active.alive and not mesh.headHidden)
 pc.target=original; press(Key.F6); active=pc.target
+gameModal.visibility=0
 widget:SetInputMode_GameAndUIEx(pc)
 tick()
 assert(pc.target==active and active.alive and pc.moveLocks==0 and pc.bShowMouseCursor)
 local inputMode=widget.mode
 press(Key.MIDDLE_MOUSE_BUTTON)
 assert(widget.mode==inputMode and pc.bShowMouseCursor) -- workbench keeps cursor ownership
-widget:SetInputMode_GameOnly(pc); pc.bShowMouseCursor=false
-for _=1,20 do tick() end
+-- Chest closes into mixed input mode rather than sending GameOnly.
+gameModal.visibility=1
+widget:SetInputMode_GameAndUIEx(pc)
+tick(); press(Key.MIDDLE_MOUSE_BUTTON)
 assert(pc.moveLocks==1 and pc.target==active)
 clock=clock+0.35
 keys[Key.MIDDLE_MOUSE_BUTTON](); keys[Key.MIDDLE_MOUSE_BUTTON](); drain()
@@ -548,9 +562,24 @@ keys[Key.MIDDLE_MOUSE_BUTTON](); drain()
 assert(pc.bShowMouseCursor) -- rapid repeat does not churn native focus
 clock=clock+0.35
 keys[Key.MIDDLE_MOUSE_BUTTON]() -- game opens workbench before our callback runs
+gameModal.visibility=0
 widget:SetInputMode_UIOnlyEx(pc); pc.bShowMouseCursor=true
 drain(); tick()
 assert(widget.mode=='uiOnly' and pc.bShowMouseCursor and pc.moveLocks==0)
+gameModal.visibility=2
+tick(); press(Key.MIDDLE_MOUSE_BUTTON)
+assert(pc.moveLocks==1 and not pc.bShowMouseCursor) -- recover even without another native mode event
+gameModal.owner=remote; gameModal.visibility=0
+assert(not require('menu').nativeUIOpen(pc)) -- remote player's menu does not block us
+gameModal.owner=nil; gameModal.visibility=1
+gameModal.visibility=0
+function gameModal:IsInViewport() return false end
+hiddenModalParent.visibility=2
+assert(not require('menu').nativeUIOpen(pc)) -- hidden parent makes nested chest invisible
+hiddenModalParent.visibility=0
+assert(require('menu').nativeUIOpen(pc))
+gameModal.visibility=1
+function gameModal:IsInViewport() return true end
 press(Key.F6)
 assert(pc.target==original and not active.alive)
 -- Native rudder input must never be consumed or replaced with forced walking.
